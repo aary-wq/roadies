@@ -3,514 +3,414 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-    ArrowLeft,
-    MapPin,
-    Navigation,
-    Search,
-    Calendar,
-    Clock,
-    Car,
-    Footprints,
-    Bike,
-    Loader,
-    ChevronDown,
-    ChevronUp,
-    ArrowRightLeft,
-    LocateFixed,
-    ArrowRight,
-    Route,
-    Timer,
-    Ruler,
+    ArrowLeft, MapPin, Navigation, Search, Car, Footprints, Bike, Train,
+    Loader, ChevronDown, ChevronUp, ArrowRightLeft, LocateFixed, Truck,
+    Timer, Ruler, Route, Clock,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
-import { Luckiest_Guy } from 'next/font/google';
 
-const luckiestGuy = Luckiest_Guy({ weight: '400', subsets: ['latin'] });
-
-interface RouteStep {
-    instruction: string;
-    name: string;
-    distance: number;
+// ─── Types ────────────────────────────────────────────
+interface TransitLeg {
+    type: 'walk' | 'train';
+    from: { name: string };
+    to: { name: string };
     duration: number;
-    maneuverType: string;
-    maneuverModifier: string;
+    distance: number;
+    line?: string;
+    lineColor?: string;
+    lineCode?: string;
+    stops?: number;
+    serviceName?: string;
+    frequency?: string;
 }
 
 interface RouteResult {
+    type: 'single' | 'transit';
     mode: string;
     modeName: string;
-    modeIcon: string;
     modeColor: string;
+    modeIcon: string;
     totalDistance: number;
     totalDuration: number;
-    steps: RouteStep[];
+    departureTime?: string;
+    arrivalTime?: string;
+    summary?: string;
+    linesBadges?: { code: string; color: string }[];
+    legs?: TransitLeg[];
+    steps?: { instruction: string; distance: number; duration: number }[];
 }
 
-const modeIcons: Record<string, any> = { car: Car, walk: Footprints, bike: Bike };
+// ─── Helpers ──────────────────────────────────────────
+const icons: Record<string, any> = { car: Car, walk: Footprints, bike: Bike, train: Train, auto: Truck };
+function fmt(sec: number) { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} hr ${m % 60} min`; }
+function fmtD(m: number) { return m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`; }
 
-function formatDuration(seconds: number): string {
-    const mins = Math.round(seconds / 60);
-    if (mins < 60) return `${mins} min`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
-}
-
-function formatDistance(meters: number): string {
-    if (meters < 1000) return `${meters} m`;
-    return `${(meters / 1000).toFixed(1)} km`;
-}
-
-// Geocoding
-async function searchPlaces(query: string): Promise<Array<{ display: string; lat: number; lng: number }>> {
-    if (query.length < 3) return [];
+async function searchPlaces(q: string) {
+    if (q.length < 3) return [];
     try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=in`);
-        const data = await res.json();
-        return data.map((item: any) => ({
-            display: item.display_name,
-            lat: parseFloat(item.lat),
-            lng: parseFloat(item.lon),
-        }));
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&countrycodes=in`);
+        return (await r.json()).map((i: any) => ({ display: i.display_name, lat: +i.lat, lng: +i.lon }));
     } catch { return []; }
 }
 
+// ─── Component ────────────────────────────────────────
 export default function PlanTripPage() {
     const router = useRouter();
     const [source, setSource] = useState('');
     const [destination, setDestination] = useState('');
-    const [sourceCoords, setSourceCoords] = useState<{ lat: number; lng: number } | null>(null);
-    const [destCoords, setDestCoords] = useState<{ lat: number; lng: number } | null>(null);
-    const [sourceSuggestions, setSourceSuggestions] = useState<Array<{ display: string; lat: number; lng: number }>>([]);
-    const [destSuggestions, setDestSuggestions] = useState<Array<{ display: string; lat: number; lng: number }>>([]);
-    const [showSourceSugg, setShowSourceSugg] = useState(false);
-    const [showDestSugg, setShowDestSugg] = useState(false);
-
-    // Multi-vehicle selection
-    const [selectedModes, setSelectedModes] = useState<string[]>(['driving', 'foot', 'bicycle']);
-
+    const [srcC, setSrcC] = useState<{ lat: number; lng: number } | null>(null);
+    const [dstC, setDstC] = useState<{ lat: number; lng: number } | null>(null);
+    const [srcSugg, setSrcSugg] = useState<any[]>([]);
+    const [dstSugg, setDstSugg] = useState<any[]>([]);
+    const [showSrc, setShowSrc] = useState(false);
+    const [showDst, setShowDst] = useState(false);
+    const [modes] = useState(['transit', 'drive', 'walk', 'bicycle', 'auto']);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [routes, setRoutes] = useState<RouteResult[]>([]);
-    const [activeRoute, setActiveRoute] = useState<string | null>(null);
-    const [expandedSteps, setExpandedSteps] = useState(false);
+    const [activeIdx, setActiveIdx] = useState(0);
+    const [showSteps, setShowSteps] = useState(true);
+    const srcT = useRef<NodeJS.Timeout | null>(null);
+    const dstT = useRef<NodeJS.Timeout | null>(null);
 
-    const srcTimer = useRef<NodeJS.Timeout | null>(null);
-    const dstTimer = useRef<NodeJS.Timeout | null>(null);
+    const onSrc = (v: string) => { setSource(v); setSrcC(null); if (srcT.current) clearTimeout(srcT.current); srcT.current = setTimeout(async () => { const r = await searchPlaces(v); setSrcSugg(r); setShowSrc(r.length > 0); }, 300); };
+    const onDst = (v: string) => { setDestination(v); setDstC(null); if (dstT.current) clearTimeout(dstT.current); dstT.current = setTimeout(async () => { const r = await searchPlaces(v); setDstSugg(r); setShowDst(r.length > 0); }, 300); };
+    const pickSrc = (p: any) => { setSource(p.display.split(',').slice(0, 2).join(',')); setSrcC({ lat: p.lat, lng: p.lng }); setShowSrc(false); };
+    const pickDst = (p: any) => { setDestination(p.display.split(',').slice(0, 2).join(',')); setDstC({ lat: p.lat, lng: p.lng }); setShowDst(false); };
+    const swap = () => { setSource(destination); setDestination(source); setSrcC(dstC); setDstC(srcC); };
+    const gps = () => { navigator.geolocation?.getCurrentPosition(p => { setSrcC({ lat: p.coords.latitude, lng: p.coords.longitude }); setSource('Current Location'); }); };
 
-    const handleSourceChange = (v: string) => {
-        setSource(v); setSourceCoords(null);
-        if (srcTimer.current) clearTimeout(srcTimer.current);
-        srcTimer.current = setTimeout(async () => {
-            const r = await searchPlaces(v);
-            setSourceSuggestions(r); setShowSourceSugg(r.length > 0);
-        }, 350);
-    };
-
-    const handleDestChange = (v: string) => {
-        setDestination(v); setDestCoords(null);
-        if (dstTimer.current) clearTimeout(dstTimer.current);
-        dstTimer.current = setTimeout(async () => {
-            const r = await searchPlaces(v);
-            setDestSuggestions(r); setShowDestSugg(r.length > 0);
-        }, 350);
-    };
-
-    const selectSource = (p: { display: string; lat: number; lng: number }) => {
-        setSource(p.display.split(',').slice(0, 3).join(',')); setSourceCoords({ lat: p.lat, lng: p.lng }); setShowSourceSugg(false);
-    };
-    const selectDest = (p: { display: string; lat: number; lng: number }) => {
-        setDestination(p.display.split(',').slice(0, 3).join(',')); setDestCoords({ lat: p.lat, lng: p.lng }); setShowDestSugg(false);
-    };
-
-    const swapLocations = () => {
-        setSource(destination); setDestination(source);
-        setSourceCoords(destCoords); setDestCoords(sourceCoords);
-    };
-
-    const useCurrentLocation = () => {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition(
-            (pos) => { setSourceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setSource('Current Location'); },
-            () => setError('Could not get your location')
-        );
-    };
-
-    const toggleMode = (mode: string) => {
-        setSelectedModes(prev =>
-            prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]
-        );
-    };
-
-    const handleSearch = async () => {
-        setError('');
-        let fromC = sourceCoords;
-        let toC = destCoords;
-
-        if (!fromC && source) {
-            const res = await searchPlaces(source);
-            if (res.length > 0) { fromC = { lat: res[0].lat, lng: res[0].lng }; setSourceCoords(fromC); }
-        }
-        if (!toC && destination) {
-            const res = await searchPlaces(destination);
-            if (res.length > 0) { toC = { lat: res[0].lat, lng: res[0].lng }; setDestCoords(toC); }
-        }
-
-        if (!fromC || !toC) { setError('Please enter valid source and destination'); return; }
-        if (selectedModes.length === 0) { setError('Please select at least one travel mode'); return; }
-
+    const search = async () => {
+        setError(''); let fc = srcC, tc = dstC;
+        if (!fc && source) { const r = await searchPlaces(source); if (r[0]) { fc = { lat: r[0].lat, lng: r[0].lng }; setSrcC(fc); } }
+        if (!tc && destination) { const r = await searchPlaces(destination); if (r[0]) { tc = { lat: r[0].lat, lng: r[0].lng }; setDstC(tc); } }
+        if (!fc || !tc) { setError('Enter valid locations'); return; }
         setIsLoading(true);
         try {
-            const response = await fetch('/api/tripgo', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fromLat: fromC.lat, fromLng: fromC.lng,
-                    toLat: toC.lat, toLng: toC.lng,
-                    modes: selectedModes,
-                }),
-            });
-            const data = await response.json();
-            if (!response.ok) { setError(data.error || 'No routes found'); setRoutes([]); }
-            else {
-                setRoutes(data.routes || []);
-                if (data.routes?.length > 0) setActiveRoute(data.routes[0].mode);
-            }
-        } catch (e: any) { setError(e.message || 'Failed to fetch routes'); setRoutes([]); }
+            const res = await fetch('/api/tripgo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromLat: fc.lat, fromLng: fc.lng, toLat: tc.lat, toLng: tc.lng, modes }) });
+            const data = await res.json();
+            if (!res.ok) { setError(data.error); setRoutes([]); } else { setRoutes(data.routes || []); setActiveIdx(0); setShowSteps(true); }
+        } catch (e: any) { setError(e.message); }
         finally { setIsLoading(false); }
     };
 
-    const activeRouteData = routes.find(r => r.mode === activeRoute);
-
-    const travelModes = [
-        { id: 'driving', label: 'Drive', icon: Car, color: '#C75B39' },
-        { id: 'foot', label: 'Walk', icon: Footprints, color: '#8B6D47' },
-        { id: 'bicycle', label: 'Bicycle', icon: Bike, color: '#40C9B0' },
-    ];
+    const active = routes[activeIdx];
 
     return (
-        <div className="min-h-screen bg-rs-sand-light flex flex-col">
-            {/* Top Bar */}
-            <nav className="bg-white/90 backdrop-blur-xl border-b border-rs-sand-dark/25 sticky top-0 z-50">
-                <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="min-h-screen bg-white flex flex-col">
+            {/* ─── Top Bar ─── */}
+            <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
+                <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
                     <div className="flex items-center h-14 gap-3">
-                        <button onClick={() => router.back()} className="p-2 rounded-lg hover:bg-rs-sand/50 transition-colors">
-                            <ArrowLeft className="h-5 w-5 text-rs-deep-brown" />
-                        </button>
-                        <div className="flex-1">
-                            <h1 className="text-base font-bold text-rs-deep-brown">Plan Your Trip</h1>
-                        </div>
-                        {source && destination && (
-                            <span className="text-xs text-rs-desert-brown hidden sm:block">
-                                {source.split(',')[0]} → {destination.split(',')[0]}
-                            </span>
-                        )}
+                        <button onClick={() => router.back()} className="p-2 -ml-2 rounded-full hover:bg-gray-100"><ArrowLeft className="h-5 w-5 text-gray-700" /></button>
+                        <span className="text-[15px] font-medium text-gray-800 truncate">
+                            {source && destination ? `${source.split(',')[0]} → ${destination.split(',')[0]}` : 'Plan your trip'}
+                        </span>
                     </div>
                 </div>
             </nav>
 
-            {/* Main content — Split layout */}
+            {/* ─── Main Split ─── */}
             <div className="flex-1 flex flex-col lg:flex-row">
-                {/* LEFT PANEL — Inputs */}
-                <div className="w-full lg:w-[420px] lg:min-w-[420px] border-r border-rs-sand-dark/20 bg-white lg:h-[calc(100vh-56px)] lg:overflow-y-auto lg:sticky lg:top-14">
-                    <div className="p-5">
-                        {/* Location inputs */}
-                        <div className="flex gap-3 mb-5">
-                            <div className="flex flex-col items-center pt-3">
-                                <div className="w-3 h-3 rounded-full border-2 border-rs-terracotta bg-white" />
-                                <div className="w-0.5 flex-1 bg-rs-sand-dark/50 my-1 min-h-[40px]" />
-                                <div className="w-3 h-3 rounded-full bg-rs-terracotta" />
-                            </div>
+                {/* ═══════ LEFT PANEL ═══════ */}
+                <div className="w-full lg:w-[400px] lg:min-w-[400px] bg-white border-r border-gray-200 lg:h-[calc(100vh-56px)] lg:overflow-y-auto lg:sticky lg:top-14 flex flex-col">
 
-                            <div className="flex-1 space-y-3">
+                    {/* Search inputs */}
+                    <div className="p-4 border-b border-gray-100">
+                        <div className="flex gap-2.5">
+                            {/* Timeline dots */}
+                            <div className="flex flex-col items-center pt-2.5">
+                                <div className="w-2.5 h-2.5 rounded-full border-2 border-blue-600" />
+                                <div className="w-0.5 flex-1 bg-gray-300 my-0.5 min-h-[32px]" />
+                                <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                            </div>
+                            <div className="flex-1 space-y-2">
+                                {/* Source */}
                                 <div className="relative">
-                                    <div className="flex gap-1.5">
-                                        <input type="text" placeholder="From — starting point" value={source}
-                                            onChange={(e) => handleSourceChange(e.target.value)}
-                                            onFocus={() => sourceSuggestions.length > 0 && setShowSourceSugg(true)}
-                                            onBlur={() => setTimeout(() => setShowSourceSugg(false), 200)}
-                                            className="flex-1 px-3 py-2.5 border border-rs-sand-dark/30 rounded-xl text-sm text-rs-deep-brown placeholder:text-rs-desert-brown/40 focus:ring-2 focus:ring-rs-terracotta/20 focus:border-rs-terracotta bg-rs-sand-light/50"
-                                        />
-                                        <button onClick={useCurrentLocation} className="p-2 rounded-lg hover:bg-rs-sand/50 text-rs-terracotta" title="Use GPS">
-                                            <LocateFixed className="h-4 w-4" />
-                                        </button>
+                                    <div className="flex gap-1">
+                                        <input type="text" placeholder="Choose starting point, or click on the map" value={source} onChange={e => onSrc(e.target.value)}
+                                            onFocus={() => srcSugg.length > 0 && setShowSrc(true)} onBlur={() => setTimeout(() => setShowSrc(false), 200)}
+                                            className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-[13px] text-gray-800 placeholder:text-gray-400 focus:bg-white focus:ring-1 focus:ring-blue-500 border-0 outline-none" />
+                                        <button onClick={gps} className="p-1.5 rounded-full hover:bg-gray-100 text-blue-600"><LocateFixed className="h-4 w-4" /></button>
                                     </div>
-                                    {showSourceSugg && (
-                                        <div className="absolute z-20 mt-1 w-full bg-white border border-rs-sand-dark/25 rounded-xl shadow-lg max-h-44 overflow-y-auto">
-                                            {sourceSuggestions.map((s, i) => (
-                                                <button key={i} onClick={() => selectSource(s)} className="w-full text-left px-3 py-2.5 text-xs text-rs-deep-brown hover:bg-rs-sand/50 border-b border-rs-sand-dark/10 last:border-0 flex items-start gap-2">
-                                                    <MapPin className="h-3 w-3 text-rs-terracotta mt-0.5 flex-shrink-0" />
-                                                    <span className="line-clamp-2">{s.display}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                                    {showSrc && <SuggestionList items={srcSugg} onSelect={pickSrc} />}
                                 </div>
+                                {/* Destination */}
                                 <div className="relative">
-                                    <input type="text" placeholder="To — destination" value={destination}
-                                        onChange={(e) => handleDestChange(e.target.value)}
-                                        onFocus={() => destSuggestions.length > 0 && setShowDestSugg(true)}
-                                        onBlur={() => setTimeout(() => setShowDestSugg(false), 200)}
-                                        className="w-full px-3 py-2.5 border border-rs-sand-dark/30 rounded-xl text-sm text-rs-deep-brown placeholder:text-rs-desert-brown/40 focus:ring-2 focus:ring-rs-terracotta/20 focus:border-rs-terracotta bg-rs-sand-light/50"
-                                    />
-                                    {showDestSugg && (
-                                        <div className="absolute z-20 mt-1 w-full bg-white border border-rs-sand-dark/25 rounded-xl shadow-lg max-h-44 overflow-y-auto">
-                                            {destSuggestions.map((s, i) => (
-                                                <button key={i} onClick={() => selectDest(s)} className="w-full text-left px-3 py-2.5 text-xs text-rs-deep-brown hover:bg-rs-sand/50 border-b border-rs-sand-dark/10 last:border-0 flex items-start gap-2">
-                                                    <MapPin className="h-3 w-3 text-rs-terracotta mt-0.5 flex-shrink-0" />
-                                                    <span className="line-clamp-2">{s.display}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <input type="text" placeholder="Choose destination" value={destination} onChange={e => onDst(e.target.value)}
+                                        onFocus={() => dstSugg.length > 0 && setShowDst(true)} onBlur={() => setTimeout(() => setShowDst(false), 200)}
+                                        className="w-full px-3 py-2 bg-gray-100 rounded-lg text-[13px] text-gray-800 placeholder:text-gray-400 focus:bg-white focus:ring-1 focus:ring-blue-500 border-0 outline-none" />
+                                    {showDst && <SuggestionList items={dstSugg} onSelect={pickDst} />}
                                 </div>
                             </div>
-
-                            <button onClick={swapLocations} className="self-center p-2 rounded-lg hover:bg-rs-sand/50 text-rs-desert-brown">
-                                <ArrowRightLeft className="h-4 w-4 rotate-90" />
-                            </button>
+                            <button onClick={swap} className="self-center p-1.5 rounded-full hover:bg-gray-100 text-gray-400"><ArrowRightLeft className="h-4 w-4 rotate-90" /></button>
                         </div>
 
-                        {/* Mode selector — multi-select */}
-                        <div className="mb-4">
-                            <p className="text-xs font-medium text-rs-desert-brown mb-2">Compare vehicles (select multiple)</p>
-                            <div className="flex gap-2">
-                                {travelModes.map((mode) => {
-                                    const selected = selectedModes.includes(mode.id);
-                                    return (
-                                        <button key={mode.id} onClick={() => toggleMode(mode.id)}
-                                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${selected
-                                                ? 'border-rs-terracotta/40 bg-rs-terracotta/8 text-rs-terracotta shadow-sm'
-                                                : 'border-rs-sand-dark/25 text-rs-desert-brown hover:bg-rs-sand/50'
-                                                }`}
-                                        >
-                                            <mode.icon className="h-4 w-4" />
-                                            {mode.label}
-                                            {selected && <div className="w-1.5 h-1.5 rounded-full bg-rs-terracotta" />}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                        {/* Search button */}
+                        <button onClick={search} disabled={isLoading || !source || !destination}
+                            className="w-full mt-3 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white text-[13px] font-medium rounded-full flex items-center justify-center gap-2 transition-colors">
+                            {isLoading ? <><Loader className="h-4 w-4 animate-spin" /> Searching...</> : <><Search className="h-4 w-4" /> Search</>}
+                        </button>
+                    </div>
 
-                        {/* Search */}
-                        <Button onClick={handleSearch} variant="primary"
-                            className="w-full py-3 bg-gradient-to-r from-rs-terracotta to-rs-sunset-orange shadow-md mb-4"
-                            disabled={isLoading || !source || !destination || selectedModes.length === 0}>
-                            {isLoading
-                                ? <span className="flex items-center gap-2"><Loader className="h-4 w-4 animate-spin" /> Finding routes...</span>
-                                : <span className="flex items-center gap-2"><Search className="h-4 w-4" /> Find Routes</span>}
-                        </Button>
+                    {error && <div className="mx-4 mt-3 p-2.5 bg-red-50 rounded-lg text-[13px] text-red-600">{error}</div>}
 
-                        {/* Error */}
-                        {error && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4">
-                                <p className="text-sm text-red-600">{error}</p>
-                            </div>
-                        )}
-
-                        {/* Route comparison cards */}
-                        {routes.length > 0 && (
-                            <div className="space-y-2">
-                                <p className="text-xs font-medium text-rs-desert-brown mb-1">
-                                    {routes.length} route{routes.length > 1 ? 's' : ''} found — tap to view details
-                                </p>
-                                {routes.map((route) => {
-                                    const IconComp = modeIcons[route.modeIcon] || Navigation;
-                                    const isActive = activeRoute === route.mode;
-                                    return (
-                                        <button key={route.mode} onClick={() => { setActiveRoute(route.mode); setExpandedSteps(false); }}
-                                            className={`w-full p-4 rounded-xl border text-left transition-all ${isActive
-                                                ? 'border-rs-terracotta/40 bg-rs-terracotta/5 shadow-sm'
-                                                : 'border-rs-sand-dark/25 bg-white hover:bg-rs-sand-light/50'
-                                                }`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                                                    style={{ background: route.modeColor + '18' }}>
-                                                    <IconComp className="h-5 w-5" style={{ color: route.modeColor }} />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-sm font-bold text-rs-deep-brown">{route.modeName}</span>
-                                                        <span className="text-sm font-bold" style={{ color: route.modeColor }}>
-                                                            {formatDuration(route.totalDuration)}
-                                                        </span>
+                    {/* Route list */}
+                    <div className="flex-1 overflow-y-auto">
+                        {routes.map((r, i) => {
+                            const IC = icons[r.modeIcon] || Navigation;
+                            const isActive = activeIdx === i;
+                            const isTransit = r.type === 'transit';
+                            return (
+                                <button key={i} onClick={() => { setActiveIdx(i); setShowSteps(true); }}
+                                    className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: r.modeColor + '15' }}>
+                                            <IC className="h-4 w-4" style={{ color: r.modeColor }} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            {isTransit && r.departureTime ? (
+                                                <>
+                                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                                        <span className="text-[14px] font-semibold text-gray-900">{r.departureTime} – {r.arrivalTime}</span>
+                                                        <span className="text-[12px] text-gray-500">({fmt(r.totalDuration)})</span>
                                                     </div>
-                                                    <div className="flex items-center gap-3 mt-0.5">
-                                                        <span className="text-xs text-rs-desert-brown flex items-center gap-1">
-                                                            <Ruler className="h-3 w-3" /> {formatDistance(route.totalDistance)}
-                                                        </span>
-                                                        <span className="text-xs text-rs-desert-brown flex items-center gap-1">
-                                                            <Route className="h-3 w-3" /> {route.steps.length} steps
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                {isActive && <div className="w-2 h-2 rounded-full bg-rs-terracotta flex-shrink-0" />}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
+                                                    {r.linesBadges && r.linesBadges.length > 0 && (
+                                                        <div className="flex items-center gap-1 mb-1 flex-wrap">
+                                                            {r.legs?.map((leg, li) => (
+                                                                <span key={li} className="flex items-center gap-0.5">
+                                                                    {li > 0 && <span className="text-gray-300 text-[10px] mx-0.5">›</span>}
+                                                                    {leg.type === 'walk' ? (
+                                                                        <Footprints className="h-3 w-3 text-gray-400" />
+                                                                    ) : (
+                                                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ background: leg.lineColor || r.modeColor }}>
+                                                                            {leg.lineCode}
+                                                                        </span>
+                                                                    )}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <p className="text-[12px] text-gray-500 truncate">{r.summary}</p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="text-[14px] font-semibold text-gray-900">{r.modeName}</span>
+                                                    <span className="text-[12px] text-gray-500 ml-2">{fmt(r.totalDuration)}</span>
+                                                    <p className="text-[12px] text-gray-500">{fmtD(r.totalDistance)}</p>
+                                                </>
+                                            )}
+                                        </div>
+                                        {isActive && <div className="w-1 h-8 rounded-full mt-0.5" style={{ background: r.modeColor }} />}
+                                    </div>
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* RIGHT PANEL — Route details */}
-                <div className="flex-1 lg:h-[calc(100vh-56px)] lg:overflow-y-auto">
+                {/* ═══════ RIGHT PANEL ═══════ */}
+                <div className="flex-1 bg-gray-50 lg:h-[calc(100vh-56px)] lg:overflow-y-auto">
                     {!routes.length && !isLoading && (
-                        <div className="h-full flex items-center justify-center p-8">
-                            <div className="text-center max-w-sm">
-                                <div className="w-16 h-16 rounded-2xl bg-rs-terracotta/10 flex items-center justify-center mx-auto mb-4">
-                                    <Navigation className="h-8 w-8 text-rs-terracotta/40" />
-                                </div>
-                                <h3 className={`${luckiestGuy.className} text-xl text-rs-deep-brown mb-2`}>Enter Your Route</h3>
-                                <p className="text-sm text-rs-desert-brown leading-relaxed">
-                                    Enter a source and destination on the left, select your travel modes, and hit &quot;Find Routes&quot;
-                                    to compare options.
-                                </p>
+                        <div className="h-full flex items-center justify-center p-10">
+                            <div className="text-center max-w-xs">
+                                <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4"><Navigation className="h-7 w-7 text-gray-300" /></div>
+                                <p className="text-[14px] text-gray-500">Enter source and destination to find routes</p>
                             </div>
                         </div>
                     )}
-
                     {isLoading && (
-                        <div className="h-full flex items-center justify-center p-8">
-                            <div className="text-center">
-                                <div className="animate-spin rounded-full h-12 w-12 border-2 border-rs-terracotta border-t-transparent mx-auto mb-4" />
-                                <p className="text-rs-desert-brown text-sm">Searching routes across multiple vehicles...</p>
-                            </div>
-                        </div>
+                        <div className="h-full flex items-center justify-center"><div className="text-center">
+                            <Loader className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-3" />
+                            <p className="text-[13px] text-gray-500">Finding the best routes...</p>
+                        </div></div>
                     )}
 
-                    {activeRouteData && (
-                        <div className="p-5 sm:p-8">
-                            {/* Route header */}
-                            <div className="bg-white rounded-2xl border border-rs-sand-dark/25 p-5 sm:p-6 mb-5 shadow-sm">
-                                <div className="flex items-center gap-3 mb-4">
-                                    {(() => {
-                                        const IC = modeIcons[activeRouteData.modeIcon] || Navigation; return (
-                                            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: activeRouteData.modeColor + '15' }}>
-                                                <IC className="h-6 w-6" style={{ color: activeRouteData.modeColor }} />
-                                            </div>
-                                        );
-                                    })()}
-                                    <div>
-                                        <h2 className="text-lg font-bold text-rs-deep-brown">{activeRouteData.modeName} Route</h2>
-                                        <p className="text-sm text-rs-desert-brown">
-                                            {source.split(',')[0]} → {destination.split(',')[0]}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-rs-sand-light/60 rounded-xl p-3 text-center">
-                                        <Timer className="h-4 w-4 mx-auto mb-1 text-rs-terracotta" />
-                                        <p className="text-lg font-bold text-rs-deep-brown">{formatDuration(activeRouteData.totalDuration)}</p>
-                                        <p className="text-xs text-rs-desert-brown">Duration</p>
-                                    </div>
-                                    <div className="bg-rs-sand-light/60 rounded-xl p-3 text-center">
-                                        <Ruler className="h-4 w-4 mx-auto mb-1 text-rs-neon-teal" />
-                                        <p className="text-lg font-bold text-rs-deep-brown">{formatDistance(activeRouteData.totalDistance)}</p>
-                                        <p className="text-xs text-rs-desert-brown">Distance</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Step-by-step timeline */}
-                            <div className="bg-white rounded-2xl border border-rs-sand-dark/25 overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setExpandedSteps(!expandedSteps)}
-                                    className="w-full p-4 sm:p-5 flex items-center justify-between text-left"
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <Route className="h-4 w-4 text-rs-terracotta" />
-                                        <span className="text-sm font-bold text-rs-deep-brown">Step-by-Step Directions</span>
-                                        <span className="text-xs text-rs-desert-brown bg-rs-sand-light px-2 py-0.5 rounded-md">
-                                            {activeRouteData.steps.length} steps
-                                        </span>
-                                    </div>
-                                    {expandedSteps ? <ChevronUp className="h-4 w-4 text-rs-desert-brown" /> : <ChevronDown className="h-4 w-4 text-rs-desert-brown" />}
-                                </button>
-
-                                {expandedSteps && (
-                                    <div className="border-t border-rs-sand-dark/15 px-4 sm:px-5 py-4">
-                                        {activeRouteData.steps.map((step, idx) => {
-                                            const isFirst = idx === 0;
-                                            const isLast = idx === activeRouteData.steps.length - 1;
-                                            const isDepart = step.maneuverType === 'depart';
-                                            const isArrive = step.maneuverType === 'arrive';
-
-                                            return (
-                                                <div key={idx} className="flex gap-3">
-                                                    {/* Timeline */}
-                                                    <div className="flex flex-col items-center w-5 flex-shrink-0">
-                                                        <div
-                                                            className={`w-3 h-3 rounded-full flex-shrink-0 ${isLast || isArrive ? 'bg-rs-terracotta' : 'border-2 bg-white'}`}
-                                                            style={{ borderColor: isLast || isArrive ? undefined : activeRouteData.modeColor }}
-                                                        />
-                                                        {!isLast && (
-                                                            <div className="w-0.5 flex-1 min-h-[24px]" style={{ background: activeRouteData.modeColor + '40' }} />
+                    {active && (
+                        <div className="p-5 sm:p-6 max-w-2xl mx-auto">
+                            {/* ─── Transit Route ─── */}
+                            {active.type === 'transit' && active.legs ? (
+                                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                                    {/* Header */}
+                                    <div className="p-4 sm:p-5 border-b border-gray-100">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[18px] font-semibold text-gray-900">{active.departureTime} – {active.arrivalTime}</span>
+                                            <span className="text-[13px] text-gray-500">({fmt(active.totalDuration)})</span>
+                                        </div>
+                                        {active.linesBadges && (
+                                            <div className="flex items-center gap-1.5 mb-2">
+                                                {active.legs.map((leg, i) => (
+                                                    <span key={i} className="flex items-center gap-0.5">
+                                                        {i > 0 && <span className="text-gray-300">›</span>}
+                                                        {leg.type === 'walk' ? <Footprints className="h-3.5 w-3.5 text-gray-400" /> : (
+                                                            <span className="px-2 py-0.5 rounded text-[11px] font-bold text-white" style={{ background: leg.lineColor }}>{leg.lineCode}</span>
                                                         )}
-                                                    </div>
-
-                                                    {/* Content */}
-                                                    <div className={`flex-1 pb-4 ${isLast ? 'pb-0' : ''}`}>
-                                                        <p className={`text-sm ${isDepart || isArrive ? 'font-bold text-rs-deep-brown' : 'text-rs-deep-brown/80'}`}>
-                                                            {step.instruction}
-                                                        </p>
-                                                        {!isDepart && !isArrive && step.distance > 0 && (
-                                                            <p className="text-xs text-rs-desert-brown mt-0.5">
-                                                                {formatDistance(step.distance)} · {formatDuration(step.duration)}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Vehicle comparison at bottom */}
-                            {routes.length > 1 && (
-                                <div className="mt-5 bg-white rounded-2xl border border-rs-sand-dark/25 p-4 sm:p-5 shadow-sm">
-                                    <p className="text-xs font-medium text-rs-desert-brown mb-3">Compare all vehicles</p>
-                                    <div className="space-y-2">
-                                        {routes.map((r) => {
-                                            const IC = modeIcons[r.modeIcon] || Navigation;
-                                            const fastest = Math.min(...routes.map(x => x.totalDuration));
-                                            const isFastest = r.totalDuration === fastest;
-                                            return (
-                                                <div key={r.mode} className="flex items-center gap-3 py-2">
-                                                    <IC className="h-4 w-4 flex-shrink-0" style={{ color: r.modeColor }} />
-                                                    <span className="text-sm font-medium text-rs-deep-brown w-16">{r.modeName}</span>
-                                                    <div className="flex-1 h-2 bg-rs-sand-light rounded-full overflow-hidden">
-                                                        <div
-                                                            className="h-full rounded-full transition-all"
-                                                            style={{
-                                                                width: `${Math.min(100, (fastest / r.totalDuration) * 100)}%`,
-                                                                background: r.modeColor,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <span className="text-xs font-medium text-rs-deep-brown w-20 text-right">
-                                                        {formatDuration(r.totalDuration)}
                                                     </span>
-                                                    {isFastest && (
-                                                        <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
-                                                            Fastest
-                                                        </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <p className="text-[12px] text-gray-500">{active.summary}</p>
+                                    </div>
+
+                                    {/* ─── Google Maps Timeline ─── */}
+                                    <div className="p-4 sm:p-5">
+                                        {active.legs.map((leg, li) => {
+                                            const isWalk = leg.type === 'walk';
+                                            const color = isWalk ? '#9CA3AF' : (leg.lineColor || '#1a73e8');
+                                            const isFirst = li === 0;
+                                            const isLast = li === active.legs!.length - 1;
+
+                                            return (
+                                                <div key={li}>
+                                                    {/* FROM point */}
+                                                    {(isFirst || li > 0) && (
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="w-14 text-right flex-shrink-0">
+                                                                {!isWalk && <span className="text-[12px] font-medium text-gray-700">
+                                                                    {li === 0 && active.departureTime}
+                                                                </span>}
+                                                            </div>
+                                                            <div className="flex flex-col items-center">
+                                                                <div className={`w-3 h-3 rounded-full border-2 bg-white`} style={{ borderColor: color }} />
+                                                            </div>
+                                                            <div className="pb-0">
+                                                                <p className="text-[13px] font-semibold text-gray-900">{leg.from.name}</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* LEG details */}
+                                                    <div className="flex items-stretch gap-3">
+                                                        <div className="w-14 flex-shrink-0" />
+                                                        <div className="flex flex-col items-center">
+                                                            <div className="flex-1 min-h-[48px]" style={{
+                                                                width: isWalk ? '2px' : '4px',
+                                                                background: isWalk ? `repeating-linear-gradient(to bottom, ${color} 0px, ${color} 3px, transparent 3px, transparent 7px)` : color,
+                                                            }} />
+                                                        </div>
+                                                        <div className="flex-1 py-2">
+                                                            {isWalk ? (
+                                                                <div className="flex items-center gap-2">
+                                                                    <Footprints className="h-3.5 w-3.5 text-gray-400" />
+                                                                    <span className="text-[12px] text-gray-500">Walk · About {leg.duration} min, {fmtD(leg.distance)}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="bg-gray-50 rounded-lg p-2.5">
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        <Train className="h-3.5 w-3.5" style={{ color }} />
+                                                                        <span className="px-2 py-0.5 rounded text-[11px] font-bold text-white" style={{ background: color }}>
+                                                                            {leg.lineCode}
+                                                                        </span>
+                                                                        <span className="text-[12px] font-medium text-gray-700">{leg.serviceName}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                                                                        {leg.stops && <span>{leg.duration} min ({leg.stops} stops)</span>}
+                                                                        {leg.frequency && <span>· {leg.frequency}</span>}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* TO point (only for last leg) */}
+                                                    {isLast && (
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="w-14 text-right flex-shrink-0">
+                                                                <span className="text-[12px] font-medium text-gray-700">{active.arrivalTime}</span>
+                                                            </div>
+                                                            <div className="flex flex-col items-center">
+                                                                <div className="w-3 h-3 rounded-full bg-red-500" />
+                                                            </div>
+                                                            <p className="text-[13px] font-semibold text-gray-900">{leg.to.name}</p>
+                                                        </div>
                                                     )}
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 </div>
-                            )}
+                            ) : active.steps ? (
+                                /* ─── Single Mode Route ─── */
+                                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                                    <div className="p-4 sm:p-5 border-b border-gray-100">
+                                        <div className="flex items-center gap-3 mb-3">
+                                            {(() => {
+                                                const IC = icons[active.modeIcon] || Navigation; return (
+                                                    <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: active.modeColor + '15' }}>
+                                                        <IC className="h-5 w-5" style={{ color: active.modeColor }} />
+                                                    </div>
+                                                );
+                                            })()}
+                                            <div>
+                                                <h2 className="text-[16px] font-semibold text-gray-900">{active.modeName}</h2>
+                                                <p className="text-[12px] text-gray-500">{source.split(',')[0]} → {destination.split(',')[0]}</p>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                                <Timer className="h-4 w-4 mx-auto mb-1" style={{ color: active.modeColor }} />
+                                                <p className="text-[16px] font-bold text-gray-900">{fmt(active.totalDuration)}</p>
+                                                <p className="text-[11px] text-gray-500">Duration</p>
+                                            </div>
+                                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                                <Ruler className="h-4 w-4 mx-auto mb-1 text-blue-500" />
+                                                <p className="text-[16px] font-bold text-gray-900">{fmtD(active.totalDistance)}</p>
+                                                <p className="text-[11px] text-gray-500">Distance</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Steps */}
+                                    <button onClick={() => setShowSteps(!showSteps)} className="w-full px-4 sm:px-5 py-3 flex items-center justify-between border-b border-gray-100 hover:bg-gray-50">
+                                        <span className="text-[13px] font-medium text-gray-700 flex items-center gap-2">
+                                            <Route className="h-4 w-4" style={{ color: active.modeColor }} />
+                                            Directions
+                                            <span className="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{active.steps!.length}</span>
+                                        </span>
+                                        {showSteps ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                                    </button>
+
+                                    {showSteps && (
+                                        <div className="p-4 sm:p-5 space-y-0">
+                                            {active.steps.map((step, si) => {
+                                                const isLast = si === active.steps!.length - 1;
+                                                return (
+                                                    <div key={si} className="flex gap-3">
+                                                        <div className="flex flex-col items-center w-4 flex-shrink-0">
+                                                            <div className={`w-2.5 h-2.5 rounded-full ${isLast ? 'bg-red-500' : 'border-2 bg-white'}`} style={{ borderColor: isLast ? undefined : active.modeColor }} />
+                                                            {!isLast && <div className="w-0.5 flex-1 min-h-[20px]" style={{ background: active.modeColor + '30' }} />}
+                                                        </div>
+                                                        <div className={`flex-1 ${isLast ? '' : 'pb-3'}`}>
+                                                            <p className="text-[13px] text-gray-700">{step.instruction}</p>
+                                                            {step.distance > 0 && (
+                                                                <p className="text-[11px] text-gray-400 mt-0.5">{fmtD(step.distance)} · {fmt(step.duration)}</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+// Suggestion dropdown
+function SuggestionList({ items, onSelect }: { items: any[]; onSelect: (p: any) => void }) {
+    return (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+            {items.map((s: any, i: number) => (
+                <button key={i} onClick={() => onSelect(s)} className="w-full text-left px-3 py-2.5 text-[12px] text-gray-700 hover:bg-blue-50 border-b border-gray-100 last:border-0 flex items-start gap-2">
+                    <MapPin className="h-3 w-3 text-red-400 mt-0.5 flex-shrink-0" />
+                    <span className="line-clamp-2">{s.display}</span>
+                </button>
+            ))}
         </div>
     );
 }
