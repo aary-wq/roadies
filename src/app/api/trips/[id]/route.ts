@@ -119,6 +119,9 @@ export async function GET(
 }
 
 /* ===================== UPDATE TRIP ===================== */
+import type { ITrip } from '../../../../models/Trip';
+
+/* ===================== UPDATE TRIP ===================== */
 export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -142,14 +145,19 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const updates = await req.json();
-    const allowedFields = ['status', 'selectedTransport', 'selectedSpots'];
+    const updates = (await req.json()) as Partial<ITrip>;
 
-    allowedFields.forEach((field) => {
+    const allowedFields: (keyof ITrip)[] = [
+      'status',
+      'selectedTransport',
+      'selectedSpots',
+    ];
+
+    for (const field of allowedFields) {
       if (updates[field] !== undefined) {
-        trip[field] = updates[field];
+        trip.set(field, updates[field]);
       }
-    });
+    }
 
     await trip.save();
 
