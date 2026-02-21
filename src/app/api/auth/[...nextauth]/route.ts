@@ -2,7 +2,7 @@ import NextAuth, { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import dbConnect from '../../../../lib/mongodb';
 import User from '../../../../models/User';
-import bcrypt from 'bcryptjs';
+   import bcrypt from 'bcryptjs';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -14,43 +14,30 @@ export const authOptions: NextAuthOptions = {
       },
 
 async authorize(credentials) {
-  console.log('🔐 AUTHORIZE CALLED');
-  console.log('📨 Credentials:', credentials);
-
-  try {
-    await dbConnect();
-    console.log('✅ DB connected inside authorize');
-
-    const user = await User.findOne({
-      email: credentials?.email?.toLowerCase(),
-    });
-
-    console.log('👤 User found:', user ? 'YES' : 'NO');
-
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    const isValid = await new Promise<boolean>((resolve) => {
-      user.authenticate(credentials!.password, (err: any, authUser: any) => {
-        console.log('🔑 Auth result:', { err, authUser });
-        resolve(!err && !!authUser);
-      });
-    });
-
-    if (!isValid) {
-      throw new Error('Invalid password');
-    }
-
-    return {
-      id: user._id.toString(),
-      email: user.email,
-      name: user.name,
-    };
-  } catch (err: any) {
-    console.error('❌ AUTHORIZE ERROR:', err);
-    throw err;
+  if (!credentials?.email || !credentials?.password) {
+    return null;
   }
+
+  await dbConnect();
+
+  const user = await User.findOne({
+    email: credentials.email.toLowerCase(),
+  }).select('+password').lean(); // 🔥 CRITICAL
+
+  if (!user) return null;
+
+  const isValid = await bcrypt.compare(
+    credentials.password,
+    user.password
+  );
+
+  if (!isValid) return null;
+
+  return {
+    id: user._id.toString(),
+    email: user.email,
+    name: user.name,
+  };
 }
     }),
   ],
