@@ -159,16 +159,16 @@ export default function DashboardPage() {
                   className="flex-1 sm:flex-none bg-gradient-to-r from-rs-terracotta to-rs-sunset-orange shadow-md"
                   onClick={() => setShowTripForm(true)}
                 >
-                  <Mic className="mr-2 h-4 w-4" />
-                  Voice Plan
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create long trip
                 </Button>
                 <Button 
                   variant="outline" 
                   className="flex-1 sm:flex-none border-white/30 text-white hover:bg-white/10"
-                  onClick={() => setShowTripForm(true)}
+                  onClick={() => router.push('/plan')}
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Create Trip
+                  Create Short Trip
                 </Button>
               </div>
             </div>
@@ -268,6 +268,7 @@ export default function DashboardPage() {
       {showTripForm && (
         <TripPlanningForm onClose={() => setShowTripForm(false)} />
       )}
+      
     </div>
   );
 }

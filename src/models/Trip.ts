@@ -1,162 +1,188 @@
-import mongoose, { Schema, Document, Model } from 'mongoose';
-
-export interface ITransportOption {
-  mode: 'flight' | 'train' | 'bus' | 'car';
-  provider: string;
-  price: number;
-  duration: number; // in hours
-  departureTime?: string;
-  arrivalTime?: string;
-  stops?: number;
-  carbonFootprint?: number;
-  amenities?: string[];
-}
-
-export interface ITouristSpot {
-  name: string;
-  description: string;
-  category: string;
-  rating: number;
-  estimatedTime: number; // hours
-  entryFee: number;
-  bestTimeToVisit: string;
-  coordinates?: {
-    lat: number;
-    lng: number;
-  };
-}
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITrip extends Document {
-  userId: mongoose.Types.ObjectId;
+  userId: string;
   source: string;
   destination: string;
   startDate: Date;
   endDate: Date;
-  budget: number;
   travelers: number;
-  transportOptions: ITransportOption[];
-  selectedTransport?: ITransportOption;
-  touristSpots: ITouristSpot[];
-  selectedSpots?: string[];
-  accommodation?: {
-    type: string;
-    name: string;
+  
+  // Transport options
+  transportOptions: {
+    mode: string;
+    provider: string;
     price: number;
+    duration: number;
+    departureTime: string;
+    arrivalTime: string;
+    stops?: number;
+    carbonFootprint?: number;
+    amenities?: string[];
+    distance?: number;
+    isRecommended?: boolean;
+    recommendationReason?: string;
+  }[];
+  
+  selectedTransport?: {
+    mode: string;
+    provider: string;
+    price: number;
+    duration: number;
+  };
+  
+  // Tourist spots
+  allTouristSpots: {
+    name: string;
+    description: string;
+    category: string;
     rating: number;
+    estimatedTime: number;
+    entryFee: number;
+    bestTimeToVisit: string;
+    coordinates?: {
+      lat: number;
+      lng: number;
+    };
+    image?: string;
+    address?: string;
+    isPopular?: boolean;
+    popularity?: number;
+  }[];
+  
+  selectedTouristSpots: string[]; // Array of spot names
+  
+  // Itinerary
+  itinerary: {
+    day: number;
+    date: Date;
+    spots: {
+      name: string;
+      startTime: string;
+      endTime: string;
+      duration: number;
+      travelTimeToNext?: number;
+    }[];
+    totalHours: number;
+    warnings?: string[];
+  }[];
+  
+  // Costs
+  costs: {
+    transport: number;
+    accommodation: number;
+    food: number;
+    attractions: number;
+    total: number;
   };
-  totalEstimatedCost: number;
-  status: 'planning' | 'confirmed' | 'completed' | 'cancelled';
+  
   preferences: {
-    budgetType: 'budget' | 'moderate' | 'luxury';
-    pace: 'relaxed' | 'moderate' | 'packed';
-    interests: string[];
+    budgetType?: string;
+    interests?: string[];
+    maxHoursPerDay?: number;
   };
+  
+  status: 'planning' | 'confirmed' | 'completed' | 'cancelled';
   createdAt: Date;
   updatedAt: Date;
 }
 
-const TransportOptionSchema = new Schema({
-  mode: {
+const TripSchema: Schema = new Schema({
+  userId: {
     type: String,
-    enum: ['flight', 'train', 'bus', 'car'],
+    required: true,
+    index: true,
+  },
+  source: {
+    type: String,
     required: true,
   },
-  provider: String,
-  price: Number,
-  duration: Number,
-  departureTime: String,
-  arrivalTime: String,
-  stops: Number,
-  carbonFootprint: Number,
-  amenities: [String],
-});
-
-const TouristSpotSchema = new Schema({
-  name: String,
-  description: String,
-  category: String,
-  rating: Number,
-  estimatedTime: Number,
-  entryFee: Number,
-  bestTimeToVisit: String,
-  coordinates: {
-    lat: Number,
-    lng: Number,
+  destination: {
+    type: String,
+    required: true,
   },
-});
-
-const TripSchema = new Schema<ITrip>(
-  {
-    userId: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
+  startDate: {
+    type: Date,
+    required: true,
+  },
+  endDate: {
+    type: Date,
+    required: true,
+  },
+  travelers: {
+    type: Number,
+    default: 1,
+  },
+  transportOptions: [{
+    mode: String,
+    provider: String,
+    price: Number,
+    duration: Number,
+    departureTime: String,
+    arrivalTime: String,
+    stops: Number,
+    carbonFootprint: Number,
+    amenities: [String],
+    distance: Number,
+    isRecommended: Boolean,
+    recommendationReason: String,
+  }],
+  selectedTransport: {
+    mode: String,
+    provider: String,
+    price: Number,
+    duration: Number,
+  },
+  allTouristSpots: [{
+    name: String,
+    description: String,
+    category: String,
+    rating: Number,
+    estimatedTime: Number,
+    entryFee: Number,
+    bestTimeToVisit: String,
+    coordinates: {
+      lat: Number,
+      lng: Number,
     },
-    source: {
-      type: String,
-      required: true,
-    },
-    destination: {
-      type: String,
-      required: true,
-    },
-    startDate: {
-      type: Date,
-      required: true,
-    },
-    endDate: {
-      type: Date,
-      required: true,
-    },
-    budget: {
-      type: Number,
-      required: true,
-    },
-    travelers: {
-      type: Number,
-      default: 1,
-    },
-    transportOptions: [TransportOptionSchema],
-    selectedTransport: TransportOptionSchema,
-    touristSpots: [TouristSpotSchema],
-    selectedSpots: [String],
-    accommodation: {
-      type: {
-        type: String,
-      },
+    image: String,
+    address: String,
+    isPopular: Boolean,
+    popularity: Number,
+  }],
+  selectedTouristSpots: [String],
+  itinerary: [{
+    day: Number,
+    date: Date,
+    spots: [{
       name: String,
-      price: Number,
-      rating: Number,
-    },
-    totalEstimatedCost: {
-      type: Number,
-      default: 0,
-    },
-    status: {
-      type: String,
-      enum: ['planning', 'confirmed', 'completed', 'cancelled'],
-      default: 'planning',
-    },
-    preferences: {
-      budgetType: {
-        type: String,
-        enum: ['budget', 'moderate', 'luxury'],
-        default: 'moderate',
-      },
-      pace: {
-        type: String,
-        enum: ['relaxed', 'moderate', 'packed'],
-        default: 'moderate',
-      },
-      interests: [String],
-    },
+      startTime: String,
+      endTime: String,
+      duration: Number,
+      travelTimeToNext: Number,
+    }],
+    totalHours: Number,
+    warnings: [String],
+  }],
+  costs: {
+    transport: { type: Number, default: 0 },
+    accommodation: { type: Number, default: 0 },
+    food: { type: Number, default: 0 },
+    attractions: { type: Number, default: 0 },
+    total: { type: Number, default: 0 },
   },
-  {
-    timestamps: true,
-  }
-);
+  preferences: {
+    budgetType: String,
+    interests: [String],
+    maxHoursPerDay: { type: Number, default: 12 },
+  },
+  status: {
+    type: String,
+    enum: ['planning', 'confirmed', 'completed', 'cancelled'],
+    default: 'planning',
+  },
+}, {
+  timestamps: true,
+});
 
-const Trip: Model<ITrip> =
-  mongoose.models.Trip || mongoose.model<ITrip>('Trip', TripSchema);
-
-export default Trip;
+export default mongoose.models.Trip || mongoose.model<ITrip>('Trip', TripSchema);

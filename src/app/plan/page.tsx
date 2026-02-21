@@ -1,516 +1,396 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-    ArrowLeft,
-    MapPin,
-    Navigation,
-    Search,
-    Calendar,
-    Clock,
-    Car,
-    Footprints,
-    Bike,
-    Loader,
-    ChevronDown,
-    ChevronUp,
-    ArrowRightLeft,
-    LocateFixed,
-    ArrowRight,
-    Route,
-    Timer,
-    Ruler,
-} from 'lucide-react';
-import { Button } from '../../components/ui/Button';
-import { Luckiest_Guy } from 'next/font/google';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import TransportFilter from '../../components/trip/TransportFilter';
+import TransportSelection from '../../components/trip/TransportSelection';
+import TouristSpotSelection from '../../components/trip/TouristSpotSelection';
+import ItineraryDisplay from '../../components/trip/ItineraryDisplay';
+export default function PlanPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tripId = searchParams.get('tripId');
 
-const luckiestGuy = Luckiest_Guy({ weight: '400', subsets: ['latin'] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [trip, setTrip] = useState<any>(null);
+  const [filteredTransport, setFilteredTransport] = useState<any[]>([]);
+  const [selectedTransport, setSelectedTransport] = useState<any>(null);
+  const [selectedSpots, setSelectedSpots] = useState<string[]>([]);
+  const [itinerary, setItinerary] = useState<any[]>([]);
+  const [costs, setCosts] = useState({
+    transport: 0,
+    accommodation: 0,
+    food: 0,
+    attractions: 0,
+    total: 0,
+  });
+  const [saving, setSaving] = useState(false);
 
-interface RouteStep {
-    instruction: string;
-    name: string;
-    distance: number;
-    duration: number;
-    maneuverType: string;
-    maneuverModifier: string;
-}
+  // Fetch trip data
+  useEffect(() => {
+    if (!tripId) {
+      console.error('No trip ID found');
+      setError('No trip ID provided');
+      setLoading(false);
+      return;
+    }
 
-interface RouteResult {
-    mode: string;
-    modeName: string;
-    modeIcon: string;
-    modeColor: string;
-    totalDistance: number;
-    totalDuration: number;
-    steps: RouteStep[];
-}
+    fetchTripData();
+  }, [tripId]);
 
-const modeIcons: Record<string, any> = { car: Car, walk: Footprints, bike: Bike };
-
-function formatDuration(seconds: number): string {
-    const mins = Math.round(seconds / 60);
-    if (mins < 60) return `${mins} min`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
-}
-
-function formatDistance(meters: number): string {
-    if (meters < 1000) return `${meters} m`;
-    return `${(meters / 1000).toFixed(1)} km`;
-}
-
-// Geocoding
-async function searchPlaces(query: string): Promise<Array<{ display: string; lat: number; lng: number }>> {
-    if (query.length < 3) return [];
+  const fetchTripData = async () => {
     try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=in`);
-        const data = await res.json();
-        return data.map((item: any) => ({
-            display: item.display_name,
-            lat: parseFloat(item.lat),
-            lng: parseFloat(item.lon),
-        }));
-    } catch { return []; }
-}
+      setLoading(true);
+      setError('');
+      console.log('🔍 Fetching trip:', tripId);
 
-export default function PlanTripPage() {
-    const router = useRouter();
-    const [source, setSource] = useState('');
-    const [destination, setDestination] = useState('');
-    const [sourceCoords, setSourceCoords] = useState<{ lat: number; lng: number } | null>(null);
-    const [destCoords, setDestCoords] = useState<{ lat: number; lng: number } | null>(null);
-    const [sourceSuggestions, setSourceSuggestions] = useState<Array<{ display: string; lat: number; lng: number }>>([]);
-    const [destSuggestions, setDestSuggestions] = useState<Array<{ display: string; lat: number; lng: number }>>([]);
-    const [showSourceSugg, setShowSourceSugg] = useState(false);
-    const [showDestSugg, setShowDestSugg] = useState(false);
+      const res = await fetch(`/api/trips/${tripId}`);
+      console.log('Response status:', res.status);
 
-    // Multi-vehicle selection
-    const [selectedModes, setSelectedModes] = useState<string[]>(['driving', 'foot', 'bicycle']);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`);
+      }
 
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [routes, setRoutes] = useState<RouteResult[]>([]);
-    const [activeRoute, setActiveRoute] = useState<string | null>(null);
-    const [expandedSteps, setExpandedSteps] = useState(false);
+      const data = await res.json();
+      console.log('📦 Trip data received:', data);
 
-    const srcTimer = useRef<NodeJS.Timeout | null>(null);
-    const dstTimer = useRef<NodeJS.Timeout | null>(null);
+      if (data.success && data.trip) {
+        console.log('✅ Trip loaded successfully');
+        console.log('Transport options:', data.trip.transportOptions?.length);
+        console.log('Tourist spots:', data.trip.allTouristSpots?.length);
 
-    const handleSourceChange = (v: string) => {
-        setSource(v); setSourceCoords(null);
-        if (srcTimer.current) clearTimeout(srcTimer.current);
-        srcTimer.current = setTimeout(async () => {
-            const r = await searchPlaces(v);
-            setSourceSuggestions(r); setShowSourceSugg(r.length > 0);
-        }, 350);
-    };
+        setTrip(data.trip);
+        setFilteredTransport(data.trip.transportOptions || []);
+        setSelectedTransport(data.trip.selectedTransport || null);
+        setSelectedSpots(data.trip.selectedTouristSpots || []);
+        setItinerary(data.trip.itinerary || []);
 
-    const handleDestChange = (v: string) => {
-        setDestination(v); setDestCoords(null);
-        if (dstTimer.current) clearTimeout(dstTimer.current);
-        dstTimer.current = setTimeout(async () => {
-            const r = await searchPlaces(v);
-            setDestSuggestions(r); setShowDestSugg(r.length > 0);
-        }, 350);
-    };
+        setCosts({
+          transport: data.trip.costs?.transport || 0,
+          accommodation: data.trip.costs?.accommodation || 0,
+          food: data.trip.costs?.food || 0,
+          attractions: data.trip.costs?.attractions || 0,
+          total: data.trip.costs?.total || 0,
+        });
+      } else {
+        throw new Error('Invalid trip data received');
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching trip:', error);
+      setError(error.message || 'Failed to load trip');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const selectSource = (p: { display: string; lat: number; lng: number }) => {
-        setSource(p.display.split(',').slice(0, 3).join(',')); setSourceCoords({ lat: p.lat, lng: p.lng }); setShowSourceSugg(false);
-    };
-    const selectDest = (p: { display: string; lat: number; lng: number }) => {
-        setDestination(p.display.split(',').slice(0, 3).join(',')); setDestCoords({ lat: p.lat, lng: p.lng }); setShowDestSugg(false);
-    };
+  // Handle transport filter
+  const handleFilterChange = (filters: any) => {
+    if (!trip) return;
 
-    const swapLocations = () => {
-        setSource(destination); setDestination(source);
-        setSourceCoords(destCoords); setDestCoords(sourceCoords);
-    };
+    console.log('🔧 Applying filters:', filters);
+    let filtered = [...trip.transportOptions];
 
-    const useCurrentLocation = () => {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition(
-            (pos) => { setSourceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setSource('Current Location'); },
-            () => setError('Could not get your location')
-        );
-    };
+    if (filters.budget) {
+      filtered = filtered.filter(
+        opt => opt.price * 2 * trip.travelers <= filters.budget
+      );
+    }
 
-    const toggleMode = (mode: string) => {
-        setSelectedModes(prev =>
-            prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]
-        );
-    };
+    if (filters.modes && filters.modes.length > 0) {
+      filtered = filtered.filter(opt => filters.modes.includes(opt.mode));
+    }
 
-    const handleSearch = async () => {
-        setError('');
-        let fromC = sourceCoords;
-        let toC = destCoords;
+    if (filters.maxDuration) {
+      filtered = filtered.filter(opt => opt.duration <= filters.maxDuration);
+    }
 
-        if (!fromC && source) {
-            const res = await searchPlaces(source);
-            if (res.length > 0) { fromC = { lat: res[0].lat, lng: res[0].lng }; setSourceCoords(fromC); }
-        }
-        if (!toC && destination) {
-            const res = await searchPlaces(destination);
-            if (res.length > 0) { toC = { lat: res[0].lat, lng: res[0].lng }; setDestCoords(toC); }
-        }
+    if (filters.sortBy === 'price') {
+      filtered.sort((a, b) => a.price - b.price);
+    } else if (filters.sortBy === 'duration') {
+      filtered.sort((a, b) => a.duration - b.duration);
+    }
 
-        if (!fromC || !toC) { setError('Please enter valid source and destination'); return; }
-        if (selectedModes.length === 0) { setError('Please select at least one travel mode'); return; }
+    console.log(`Filtered: ${filtered.length} options`);
+    setFilteredTransport(filtered);
+  };
 
-        setIsLoading(true);
-        try {
-            const response = await fetch('/api/tripgo', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fromLat: fromC.lat, fromLng: fromC.lng,
-                    toLat: toC.lat, toLng: toC.lng,
-                    modes: selectedModes,
-                }),
-            });
-            const data = await response.json();
-            if (!response.ok) { setError(data.error || 'No routes found'); setRoutes([]); }
-            else {
-                setRoutes(data.routes || []);
-                if (data.routes?.length > 0) setActiveRoute(data.routes[0].mode);
-            }
-        } catch (e: any) { setError(e.message || 'Failed to fetch routes'); setRoutes([]); }
-        finally { setIsLoading(false); }
-    };
+  // Handle transport selection
+  const handleSelectTransport = async (option: any) => {
+    try {
+      console.log('🚗 Selecting transport:', option);
 
-    const activeRouteData = routes.find(r => r.mode === activeRoute);
+      const res = await fetch(`/api/trips/${tripId}/transport`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transportOption: option }),
+      });
 
-    const travelModes = [
-        { id: 'driving', label: 'Drive', icon: Car, color: '#C75B39' },
-        { id: 'foot', label: 'Walk', icon: Footprints, color: '#8B6D47' },
-        { id: 'bicycle', label: 'Bicycle', icon: Bike, color: '#40C9B0' },
-    ];
+      const data = await res.json();
 
+      if (data.success) {
+        setSelectedTransport(option);
+        setCosts(data.costs);
+        console.log('✅ Transport selected, new costs:', data.costs);
+      } else {
+        console.error('Failed to select transport:', data);
+        alert('Failed to select transport');
+      }
+    } catch (error) {
+      console.error('Error selecting transport:', error);
+      alert('Failed to select transport');
+    }
+  };
+
+  const handleDeselectTransport = async () => {
+    try {
+      console.log('🚫 Deselecting transport');
+
+      const res = await fetch(`/api/trips/${tripId}/transport`, {
+        method: 'DELETE',
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setSelectedTransport(null);
+        setCosts(data.costs);
+        console.log('✅ Transport deselected');
+      } else {
+        console.error('Failed to deselect transport:', data);
+        alert('Failed to deselect transport');
+      }
+    } catch (error) {
+      console.error('Error deselecting transport:', error);
+      alert('Failed to deselect transport');
+    }
+  };
+
+  // Handle spot selection
+  const handleToggleSpot = async (spotName: string) => {
+    const newSelected = selectedSpots.includes(spotName)
+      ? selectedSpots.filter(s => s !== spotName)
+      : [...selectedSpots, spotName];
+
+    console.log('🏖️ Toggling spot:', spotName);
+    console.log('New selection:', newSelected);
+
+    try {
+      const res = await fetch(`/api/trips/${tripId}/spots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedSpots: newSelected }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setSelectedSpots(newSelected);
+        setItinerary(data.itinerary);
+        setCosts(data.costs);
+        console.log('✅ Spots updated');
+      } else {
+        console.error('Failed to update spots:', data);
+        alert('Failed to update spots');
+      }
+    } catch (error) {
+      console.error('Error updating spots:', error);
+      alert('Failed to update spots');
+    }
+  };
+
+  // Handle save trip
+  const handleSaveTrip = async () => {
+    try {
+      setSaving(true);
+      console.log('💾 Saving trip:', tripId);
+
+      const res = await fetch(`/api/trips/${tripId}/save`, {
+        method: 'POST',
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert('Trip saved successfully! ✅');
+        router.push('/dashboard');
+      } else {
+        console.error('Failed to save trip:', data);
+        alert('Failed to save trip');
+      }
+    } catch (error) {
+      console.error('Error saving trip:', error);
+      alert('Failed to save trip');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Loading state
+  if (loading) {
     return (
-        <div className="min-h-screen bg-rs-sand-light flex flex-col">
-            {/* Top Bar */}
-            <nav className="bg-white/90 backdrop-blur-xl border-b border-rs-sand-dark/25 sticky top-0 z-50">
-                <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center h-14 gap-3">
-                        <button onClick={() => router.back()} className="p-2 rounded-lg hover:bg-rs-sand/50 transition-colors">
-                            <ArrowLeft className="h-5 w-5 text-rs-deep-brown" />
-                        </button>
-                        <div className="flex-1">
-                            <h1 className="text-base font-bold text-rs-deep-brown">Plan Your Trip</h1>
-                        </div>
-                        {source && destination && (
-                            <span className="text-xs text-rs-desert-brown hidden sm:block">
-                                {source.split(',')[0]} → {destination.split(',')[0]}
-                            </span>
-                        )}
-                    </div>
-                </div>
-            </nav>
-
-            {/* Main content — Split layout */}
-            <div className="flex-1 flex flex-col lg:flex-row">
-                {/* LEFT PANEL — Inputs */}
-                <div className="w-full lg:w-[420px] lg:min-w-[420px] border-r border-rs-sand-dark/20 bg-white lg:h-[calc(100vh-56px)] lg:overflow-y-auto lg:sticky lg:top-14">
-                    <div className="p-5">
-                        {/* Location inputs */}
-                        <div className="flex gap-3 mb-5">
-                            <div className="flex flex-col items-center pt-3">
-                                <div className="w-3 h-3 rounded-full border-2 border-rs-terracotta bg-white" />
-                                <div className="w-0.5 flex-1 bg-rs-sand-dark/50 my-1 min-h-[40px]" />
-                                <div className="w-3 h-3 rounded-full bg-rs-terracotta" />
-                            </div>
-
-                            <div className="flex-1 space-y-3">
-                                <div className="relative">
-                                    <div className="flex gap-1.5">
-                                        <input type="text" placeholder="From — starting point" value={source}
-                                            onChange={(e) => handleSourceChange(e.target.value)}
-                                            onFocus={() => sourceSuggestions.length > 0 && setShowSourceSugg(true)}
-                                            onBlur={() => setTimeout(() => setShowSourceSugg(false), 200)}
-                                            className="flex-1 px-3 py-2.5 border border-rs-sand-dark/30 rounded-xl text-sm text-rs-deep-brown placeholder:text-rs-desert-brown/40 focus:ring-2 focus:ring-rs-terracotta/20 focus:border-rs-terracotta bg-rs-sand-light/50"
-                                        />
-                                        <button onClick={useCurrentLocation} className="p-2 rounded-lg hover:bg-rs-sand/50 text-rs-terracotta" title="Use GPS">
-                                            <LocateFixed className="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                    {showSourceSugg && (
-                                        <div className="absolute z-20 mt-1 w-full bg-white border border-rs-sand-dark/25 rounded-xl shadow-lg max-h-44 overflow-y-auto">
-                                            {sourceSuggestions.map((s, i) => (
-                                                <button key={i} onClick={() => selectSource(s)} className="w-full text-left px-3 py-2.5 text-xs text-rs-deep-brown hover:bg-rs-sand/50 border-b border-rs-sand-dark/10 last:border-0 flex items-start gap-2">
-                                                    <MapPin className="h-3 w-3 text-rs-terracotta mt-0.5 flex-shrink-0" />
-                                                    <span className="line-clamp-2">{s.display}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="relative">
-                                    <input type="text" placeholder="To — destination" value={destination}
-                                        onChange={(e) => handleDestChange(e.target.value)}
-                                        onFocus={() => destSuggestions.length > 0 && setShowDestSugg(true)}
-                                        onBlur={() => setTimeout(() => setShowDestSugg(false), 200)}
-                                        className="w-full px-3 py-2.5 border border-rs-sand-dark/30 rounded-xl text-sm text-rs-deep-brown placeholder:text-rs-desert-brown/40 focus:ring-2 focus:ring-rs-terracotta/20 focus:border-rs-terracotta bg-rs-sand-light/50"
-                                    />
-                                    {showDestSugg && (
-                                        <div className="absolute z-20 mt-1 w-full bg-white border border-rs-sand-dark/25 rounded-xl shadow-lg max-h-44 overflow-y-auto">
-                                            {destSuggestions.map((s, i) => (
-                                                <button key={i} onClick={() => selectDest(s)} className="w-full text-left px-3 py-2.5 text-xs text-rs-deep-brown hover:bg-rs-sand/50 border-b border-rs-sand-dark/10 last:border-0 flex items-start gap-2">
-                                                    <MapPin className="h-3 w-3 text-rs-terracotta mt-0.5 flex-shrink-0" />
-                                                    <span className="line-clamp-2">{s.display}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <button onClick={swapLocations} className="self-center p-2 rounded-lg hover:bg-rs-sand/50 text-rs-desert-brown">
-                                <ArrowRightLeft className="h-4 w-4 rotate-90" />
-                            </button>
-                        </div>
-
-                        {/* Mode selector — multi-select */}
-                        <div className="mb-4">
-                            <p className="text-xs font-medium text-rs-desert-brown mb-2">Compare vehicles (select multiple)</p>
-                            <div className="flex gap-2">
-                                {travelModes.map((mode) => {
-                                    const selected = selectedModes.includes(mode.id);
-                                    return (
-                                        <button key={mode.id} onClick={() => toggleMode(mode.id)}
-                                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${selected
-                                                ? 'border-rs-terracotta/40 bg-rs-terracotta/8 text-rs-terracotta shadow-sm'
-                                                : 'border-rs-sand-dark/25 text-rs-desert-brown hover:bg-rs-sand/50'
-                                                }`}
-                                        >
-                                            <mode.icon className="h-4 w-4" />
-                                            {mode.label}
-                                            {selected && <div className="w-1.5 h-1.5 rounded-full bg-rs-terracotta" />}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* Search */}
-                        <Button onClick={handleSearch} variant="primary"
-                            className="w-full py-3 bg-gradient-to-r from-rs-terracotta to-rs-sunset-orange shadow-md mb-4"
-                            disabled={isLoading || !source || !destination || selectedModes.length === 0}>
-                            {isLoading
-                                ? <span className="flex items-center gap-2"><Loader className="h-4 w-4 animate-spin" /> Finding routes...</span>
-                                : <span className="flex items-center gap-2"><Search className="h-4 w-4" /> Find Routes</span>}
-                        </Button>
-
-                        {/* Error */}
-                        {error && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4">
-                                <p className="text-sm text-red-600">{error}</p>
-                            </div>
-                        )}
-
-                        {/* Route comparison cards */}
-                        {routes.length > 0 && (
-                            <div className="space-y-2">
-                                <p className="text-xs font-medium text-rs-desert-brown mb-1">
-                                    {routes.length} route{routes.length > 1 ? 's' : ''} found — tap to view details
-                                </p>
-                                {routes.map((route) => {
-                                    const IconComp = modeIcons[route.modeIcon] || Navigation;
-                                    const isActive = activeRoute === route.mode;
-                                    return (
-                                        <button key={route.mode} onClick={() => { setActiveRoute(route.mode); setExpandedSteps(false); }}
-                                            className={`w-full p-4 rounded-xl border text-left transition-all ${isActive
-                                                ? 'border-rs-terracotta/40 bg-rs-terracotta/5 shadow-sm'
-                                                : 'border-rs-sand-dark/25 bg-white hover:bg-rs-sand-light/50'
-                                                }`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                                                    style={{ background: route.modeColor + '18' }}>
-                                                    <IconComp className="h-5 w-5" style={{ color: route.modeColor }} />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-sm font-bold text-rs-deep-brown">{route.modeName}</span>
-                                                        <span className="text-sm font-bold" style={{ color: route.modeColor }}>
-                                                            {formatDuration(route.totalDuration)}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-3 mt-0.5">
-                                                        <span className="text-xs text-rs-desert-brown flex items-center gap-1">
-                                                            <Ruler className="h-3 w-3" /> {formatDistance(route.totalDistance)}
-                                                        </span>
-                                                        <span className="text-xs text-rs-desert-brown flex items-center gap-1">
-                                                            <Route className="h-3 w-3" /> {route.steps.length} steps
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                {isActive && <div className="w-2 h-2 rounded-full bg-rs-terracotta flex-shrink-0" />}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* RIGHT PANEL — Route details */}
-                <div className="flex-1 lg:h-[calc(100vh-56px)] lg:overflow-y-auto">
-                    {!routes.length && !isLoading && (
-                        <div className="h-full flex items-center justify-center p-8">
-                            <div className="text-center max-w-sm">
-                                <div className="w-16 h-16 rounded-2xl bg-rs-terracotta/10 flex items-center justify-center mx-auto mb-4">
-                                    <Navigation className="h-8 w-8 text-rs-terracotta/40" />
-                                </div>
-                                <h3 className={`${luckiestGuy.className} text-xl text-rs-deep-brown mb-2`}>Enter Your Route</h3>
-                                <p className="text-sm text-rs-desert-brown leading-relaxed">
-                                    Enter a source and destination on the left, select your travel modes, and hit &quot;Find Routes&quot;
-                                    to compare options.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {isLoading && (
-                        <div className="h-full flex items-center justify-center p-8">
-                            <div className="text-center">
-                                <div className="animate-spin rounded-full h-12 w-12 border-2 border-rs-terracotta border-t-transparent mx-auto mb-4" />
-                                <p className="text-rs-desert-brown text-sm">Searching routes across multiple vehicles...</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeRouteData && (
-                        <div className="p-5 sm:p-8">
-                            {/* Route header */}
-                            <div className="bg-white rounded-2xl border border-rs-sand-dark/25 p-5 sm:p-6 mb-5 shadow-sm">
-                                <div className="flex items-center gap-3 mb-4">
-                                    {(() => {
-                                        const IC = modeIcons[activeRouteData.modeIcon] || Navigation; return (
-                                            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: activeRouteData.modeColor + '15' }}>
-                                                <IC className="h-6 w-6" style={{ color: activeRouteData.modeColor }} />
-                                            </div>
-                                        );
-                                    })()}
-                                    <div>
-                                        <h2 className="text-lg font-bold text-rs-deep-brown">{activeRouteData.modeName} Route</h2>
-                                        <p className="text-sm text-rs-desert-brown">
-                                            {source.split(',')[0]} → {destination.split(',')[0]}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-rs-sand-light/60 rounded-xl p-3 text-center">
-                                        <Timer className="h-4 w-4 mx-auto mb-1 text-rs-terracotta" />
-                                        <p className="text-lg font-bold text-rs-deep-brown">{formatDuration(activeRouteData.totalDuration)}</p>
-                                        <p className="text-xs text-rs-desert-brown">Duration</p>
-                                    </div>
-                                    <div className="bg-rs-sand-light/60 rounded-xl p-3 text-center">
-                                        <Ruler className="h-4 w-4 mx-auto mb-1 text-rs-neon-teal" />
-                                        <p className="text-lg font-bold text-rs-deep-brown">{formatDistance(activeRouteData.totalDistance)}</p>
-                                        <p className="text-xs text-rs-desert-brown">Distance</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Step-by-step timeline */}
-                            <div className="bg-white rounded-2xl border border-rs-sand-dark/25 overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setExpandedSteps(!expandedSteps)}
-                                    className="w-full p-4 sm:p-5 flex items-center justify-between text-left"
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <Route className="h-4 w-4 text-rs-terracotta" />
-                                        <span className="text-sm font-bold text-rs-deep-brown">Step-by-Step Directions</span>
-                                        <span className="text-xs text-rs-desert-brown bg-rs-sand-light px-2 py-0.5 rounded-md">
-                                            {activeRouteData.steps.length} steps
-                                        </span>
-                                    </div>
-                                    {expandedSteps ? <ChevronUp className="h-4 w-4 text-rs-desert-brown" /> : <ChevronDown className="h-4 w-4 text-rs-desert-brown" />}
-                                </button>
-
-                                {expandedSteps && (
-                                    <div className="border-t border-rs-sand-dark/15 px-4 sm:px-5 py-4">
-                                        {activeRouteData.steps.map((step, idx) => {
-                                            const isFirst = idx === 0;
-                                            const isLast = idx === activeRouteData.steps.length - 1;
-                                            const isDepart = step.maneuverType === 'depart';
-                                            const isArrive = step.maneuverType === 'arrive';
-
-                                            return (
-                                                <div key={idx} className="flex gap-3">
-                                                    {/* Timeline */}
-                                                    <div className="flex flex-col items-center w-5 flex-shrink-0">
-                                                        <div
-                                                            className={`w-3 h-3 rounded-full flex-shrink-0 ${isLast || isArrive ? 'bg-rs-terracotta' : 'border-2 bg-white'}`}
-                                                            style={{ borderColor: isLast || isArrive ? undefined : activeRouteData.modeColor }}
-                                                        />
-                                                        {!isLast && (
-                                                            <div className="w-0.5 flex-1 min-h-[24px]" style={{ background: activeRouteData.modeColor + '40' }} />
-                                                        )}
-                                                    </div>
-
-                                                    {/* Content */}
-                                                    <div className={`flex-1 pb-4 ${isLast ? 'pb-0' : ''}`}>
-                                                        <p className={`text-sm ${isDepart || isArrive ? 'font-bold text-rs-deep-brown' : 'text-rs-deep-brown/80'}`}>
-                                                            {step.instruction}
-                                                        </p>
-                                                        {!isDepart && !isArrive && step.distance > 0 && (
-                                                            <p className="text-xs text-rs-desert-brown mt-0.5">
-                                                                {formatDistance(step.distance)} · {formatDuration(step.duration)}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Vehicle comparison at bottom */}
-                            {routes.length > 1 && (
-                                <div className="mt-5 bg-white rounded-2xl border border-rs-sand-dark/25 p-4 sm:p-5 shadow-sm">
-                                    <p className="text-xs font-medium text-rs-desert-brown mb-3">Compare all vehicles</p>
-                                    <div className="space-y-2">
-                                        {routes.map((r) => {
-                                            const IC = modeIcons[r.modeIcon] || Navigation;
-                                            const fastest = Math.min(...routes.map(x => x.totalDuration));
-                                            const isFastest = r.totalDuration === fastest;
-                                            return (
-                                                <div key={r.mode} className="flex items-center gap-3 py-2">
-                                                    <IC className="h-4 w-4 flex-shrink-0" style={{ color: r.modeColor }} />
-                                                    <span className="text-sm font-medium text-rs-deep-brown w-16">{r.modeName}</span>
-                                                    <div className="flex-1 h-2 bg-rs-sand-light rounded-full overflow-hidden">
-                                                        <div
-                                                            className="h-full rounded-full transition-all"
-                                                            style={{
-                                                                width: `${Math.min(100, (fastest / r.totalDuration) * 100)}%`,
-                                                                background: r.modeColor,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <span className="text-xs font-medium text-rs-deep-brown w-20 text-right">
-                                                        {formatDuration(r.totalDuration)}
-                                                    </span>
-                                                    {isFastest && (
-                                                        <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
-                                                            Fastest
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600 text-lg">Loading your trip...</p>
         </div>
+      </div>
     );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Error Loading Trip</h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // No trip found
+  if (!trip) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-gray-600 text-lg mb-4">Trip not found</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const days = Math.ceil(
+    (new Date(trip.endDate).getTime() - new Date(trip.startDate).getTime()) /
+      (1000 * 60 * 60 * 24)
+  ) + 1;
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <button
+            onClick={() => router.push('/')}
+            className="text-blue-600 hover:text-blue-700 mb-4 flex items-center gap-2 transition"
+          >
+            ← Back to Home
+          </button>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            {trip.source} → {trip.destination}
+          </h1>
+          <p className="text-gray-600">
+            {new Date(trip.startDate).toLocaleDateString()} -{' '}
+            {new Date(trip.endDate).toLocaleDateString()} • {days} days •{' '}
+            {trip.travelers} traveler{trip.travelers > 1 ? 's' : ''}
+          </p>
+        </div>
+
+        {/* Debug Info (Remove in production) */}
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+          <p className="font-semibold mb-2">Debug Info:</p>
+          <p>Transport Options: {filteredTransport.length}</p>
+          <p>Tourist Spots: {trip.allTouristSpots?.length || 0}</p>
+          <p>Selected Spots: {selectedSpots.length}</p>
+        </div>
+
+        {/* Cost Summary */}
+        <div className="mb-8 bg-white rounded-xl border-2 border-gray-200 p-6 shadow-sm">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">
+            Estimated Cost Breakdown
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div>
+              <p className="text-sm text-gray-600">Transport</p>
+              <p className="text-2xl font-bold text-gray-900">₹{costs.transport}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Accommodation</p>
+              <p className="text-2xl font-bold text-gray-900">₹{costs.accommodation}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Food</p>
+              <p className="text-2xl font-bold text-gray-900">₹{costs.food}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Attractions</p>
+              <p className="text-2xl font-bold text-gray-900">₹{costs.attractions}</p>
+            </div>
+            <div className="bg-blue-50 rounded-lg p-4">
+              <p className="text-sm text-blue-600 font-medium">TOTAL</p>
+              <p className="text-3xl font-bold text-blue-900">₹{costs.total}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Transport Section */}
+        {filteredTransport.length > 0 ? (
+          <div className="mb-8">
+            <div className="grid lg:grid-cols-4 gap-6">
+              <div className="lg:col-span-1">
+                <TransportFilter onFilterChange={handleFilterChange} />
+              </div>
+              <div className="lg:col-span-3">
+                <TransportSelection
+                  options={filteredTransport}
+                  selectedTransport={selectedTransport}
+                  onSelect={handleSelectTransport}
+                  onDeselect={handleDeselectTransport}
+                  travelers={trip.travelers}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-8 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+            <p className="text-yellow-800">
+              ⚠️ No transport options available. This might be due to API limits or invalid route.
+            </p>
+          </div>
+        )}
+
+        {/* Tourist Spots Section */}
+        {trip.allTouristSpots && trip.allTouristSpots.length > 0 ? (
+          <div className="mb-8">
+            <TouristSpotSelection
+              spots={trip.allTouristSpots}
+              selectedSpots={selectedSpots}
+              onToggleSpot={handleToggleSpot}
+              maxDays={days}
+            />
+          </div>
+        ) : (
+          <div className="mb-8 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+            <p className="text-yellow-800">
+              ⚠️ No tourist spots found. This might be due to API limits or invalid destination.
+            </p>
+          </div>
+        )}
+
+        {/* Itinerary Section */}
+        <div>
+          <ItineraryDisplay
+            itinerary={itinerary}
+            onSaveTrip={handleSaveTrip}
+            isSaving={saving}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
