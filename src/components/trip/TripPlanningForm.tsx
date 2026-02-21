@@ -45,10 +45,10 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-  
+
     try {
-      console.log('Submitting trip data:', formData);
-  
+      console.log('🚀 Submitting trip data:', formData);
+
       const response = await fetch('/api/trips/plan', {
         method: 'POST',
         headers: {
@@ -65,26 +65,31 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
           interests: formData.interests,
         }),
       });
-  
+
       const data = await response.json();
-      console.log('Response:', data);
-  
+      console.log('📦 API Response:', data);
+
       if (!response.ok) {
-        setError(data.error || 'Failed to plan trip');
-        setIsLoading(false);
-        return;
+        throw new Error(data.error || 'Failed to plan trip');
       }
-  
-      if (data.success && data.trip?.id) {
-        console.log('Trip created successfully, redirecting to:', `/trips/${data.trip.id}`);
+
+      // Check for success and tripId
+      if (data.success && data.tripId) {
+        console.log('✅ Trip created successfully!');
+        console.log('Trip ID:', data.tripId);
+        console.log('Transport options:', data.trip?.transportOptions?.length || 0);
+        console.log('Tourist spots:', data.trip?.allTouristSpots?.length || 0);
+        console.log('Redirecting to plan page...');
         
-        // Small delay to ensure state is updated
+        // Close the modal first
+        onClose();
+        
+        // Small delay to ensure modal closes smoothly
         setTimeout(() => {
-          router.push(`/trips/${data.trip.id}`);
-        }, 500);
+          router.push(`/plan?tripId=${data.tripId}`);
+        }, 100);
       } else {
-        setError('Failed to create trip. Please try again.');
-        setIsLoading(false);
+        throw new Error('Invalid response from server');
       }
     } catch (error: any) {
       console.error('❌ Error planning trip:', error);
@@ -109,7 +114,8 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl font-bold"
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl font-bold transition"
+              disabled={isLoading}
             >
               ×
             </button>
@@ -121,13 +127,23 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
               {[1, 2, 3].map((s) => (
                 <div
                   key={s}
-                  className={`h-2 flex-1 mx-1 rounded-full ${
+                  className={`h-2 flex-1 mx-1 rounded-full transition-all ${
                     s <= step ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gray-200 dark:bg-gray-700'
                   }`}
                 />
               ))}
             </div>
           </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-red-800 dark:text-red-400 text-sm flex items-start gap-2">
+                <span className="text-lg">⚠️</span>
+                <span>{error}</span>
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit}>
             {/* Step 1: Basic Details */}
@@ -305,6 +321,7 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
                     onClick={() => setStep(2)}
                     variant="outline"
                     className="flex-1"
+                    disabled={isLoading}
                   >
                     Back
                   </Button>
@@ -318,7 +335,7 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
                     {isLoading ? (
                       <>
                         <Loader className="animate-spin mr-2 h-5 w-5" />
-                        Planning...
+                        Planning Your Trip...
                       </>
                     ) : (
                       <>

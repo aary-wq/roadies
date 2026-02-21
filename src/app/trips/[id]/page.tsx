@@ -18,6 +18,29 @@ import {
 import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 
+interface TripCosts {
+  transport: number;
+  accommodation: number;
+  food: number;
+  attractions: number;
+  total: number;
+}
+
+interface TripData {
+  _id: string;
+  source: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  travelers: number;
+  costs: TripCosts;
+  transportOptions?: any[];
+  allTouristSpots?: any[];
+  selectedTouristSpots?: string[];
+  itinerary?: any[];
+  status: string;
+}
+
 export default function TripDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -114,35 +137,38 @@ export default function TripDetailsPage() {
         </div>
 
         {/* Cost Breakdown */}
-        <Card className="p-8 mb-8 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-200 dark:border-green-800">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-            💰 Estimated Cost Breakdown
-          </h2>
-          <div className="grid md:grid-cols-4 gap-6">
-            {Object.entries(tripData.costBreakdown).map(([key, value]) => (
-              key !== 'total' && (
-                <div key={key}>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 capitalize mb-1">
-                    {key}
-                  </div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                    ₹{(value as number).toLocaleString()}
-                  </div>
-                </div>
-              )
-            ))}
+<Card className="mb-6">
+  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+    Cost Breakdown
+  </h2>
+  <div className="grid md:grid-cols-4 gap-6">
+    {tripData?.costs && (Object.entries(tripData.costs) as [string, number][])
+      .filter(([key]) => key !== 'total')
+      .map(([key, value]) => (
+        <div key={key}>
+          <div className="text-sm text-gray-600 dark:text-gray-400 capitalize mb-1">
+            {key.replace(/([A-Z])/g, ' $1').trim()}
           </div>
-          <div className="mt-6 pt-6 border-t border-green-200 dark:border-green-800">
-            <div className="flex justify-between items-center">
-              <span className="text-xl font-semibold text-gray-900 dark:text-white">
-                Total Estimated Cost
-              </span>
-              <span className="text-3xl font-bold text-green-600 dark:text-green-400">
-                ₹{tripData.costBreakdown.total.toLocaleString()}
-              </span>
-            </div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+            ₹{value}
           </div>
-        </Card>
+        </div>
+      ))
+    }
+  </div>
+  {tripData?.costs?.total && (
+    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+      <div className="flex justify-between items-center">
+        <span className="text-lg font-semibold text-gray-900 dark:text-white">
+          Total Cost
+        </span>
+        <span className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+          ₹{tripData.costs.total}
+        </span>
+      </div>
+    </div>
+  )}
+</Card>
 
         {/* Transport Options */}
         <Card className="p-8 mb-8">

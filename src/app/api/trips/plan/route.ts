@@ -3,16 +3,21 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import dbConnect from '../../../../lib/mongodb';
 import Trip from '../../../../models/Trip';
-import { getTransportOptions, getBestOptions } from '../../../../services/transportService';
-import { getTouristSpots, getRecommendedItinerary } from '../../../../services/touristSpotsService'
+import { getAllTransportOptions } from '../../../../services/api/transportAPI';
+import { getTouristSpots } from '../../../../services/api/touristAPI';
 
 export async function POST(req: NextRequest) {
   try {
+    console.log('\n🎯 === NEW TRIP PLANNING REQUEST ===');
+
     const session = await getServerSession(authOptions);
 
     if (!session || !session.user) {
+      console.log('❌ Unauthorized: No session');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    console.log(`✅ User: ${session.user.email}`);
 
     await dbConnect();
 
@@ -22,96 +27,118 @@ export async function POST(req: NextRequest) {
       destination,
       startDate,
       endDate,
-      budget,
       travelers,
       interests,
       budgetType,
     } = body;
 
+    console.log('Request body:', { source, destination, startDate, endDate, travelers, interests, budgetType });
+
     // Validation
-    if (!source || !destination || !startDate || !endDate || !budget) {
+    if (!source || !destination || !startDate || !endDate) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
-    // Calculate trip duration in days
+    console.log(`\n📊 Route: ${source} → ${destination}`);
+    console.log(`Dates: ${startDate} to ${endDate}`);
+    console.log(`Travelers: ${travelers || 1}`);
+
     const start = new Date(startDate);
     const end = new Date(endDate);
-    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // Get transport options
-    const transportOptions = await getTransportOptions(
+    console.log(`Duration: ${days} days`);
+
+    // Fetch ALL transport options
+    console.log('\n🚗 Fetching ALL transport options...');
+    const transportOptions = await getAllTransportOptions(
       source,
       destination,
-      budget * 0.4, // 40% of budget for transport
-      start
+      start.toISOString().split('T')[0]
     );
 
-    const { fastest, cheapest, recommended } = getBestOptions(transportOptions);
+    console.log(`✅ Found ${transportOptions.length} transport options`);
 
-    // Get tourist spots
+    // Fetch tourist spots
+    console.log('\n🏖️ Fetching tourist spots...');
     const touristSpots = await getTouristSpots(destination, interests);
 
-    // Get recommended itinerary
-    const itinerary = getRecommendedItinerary(touristSpots, days);
+    console.log(`✅ Found ${touristSpots.length} tourist spots`);
 
-    // Calculate estimated costs
-    const transportCost = recommended[0]?.price || 0;
-    const accommodationCost = days * (budgetType === 'budget' ? 1500 : budgetType === 'luxury' ? 5000 : 3000);
-    const foodCost = days * travelers * 1000;
-    const attractionsCost = touristSpots.slice(0, days * 3).reduce((sum, spot) => sum + spot.entryFee, 0);
-    const totalEstimatedCost = (transportCost + accommodationCost + foodCost + attractionsCost) * travelers;
+    // Calculate initial costs
+    const accommodationCostPerNight =
+      budgetType === 'budget' ? 1500 : budgetType === 'luxury' ? 5000 : 3000;
+    const accommodationCost = (days - 1) * accommodationCostPerNight;
 
-    // Create trip
+    const foodCostPerDay = 1000;
+    const foodCost = days * (travelers || 1) * foodCostPerDay;
+
+    const initialCosts = {
+      transport: 0,
+      accommodation: accommodationCost,
+      food: foodCost,
+      attractions: 0,
+      total: accommodationCost + foodCost,
+    };
+
+    console.log('\n💰 Initial Costs:', initialCosts);
+
+    // Create trip in database
+    console.log('\n💾 Saving trip to database...');
     const trip = new Trip({
       userId: session.user.id,
       source,
       destination,
       startDate: start,
       endDate: end,
-      budget,
       travelers: travelers || 1,
       transportOptions,
-      touristSpots,
-      totalEstimatedCost,
+      allTouristSpots: touristSpots,
+      selectedTouristSpots: [],
+      itinerary: [],
+      costs: initialCosts,
       preferences: {
         budgetType: budgetType || 'moderate',
-        pace: 'moderate',
         interests: interests || [],
+        maxHoursPerDay: 12,
       },
       status: 'planning',
     });
 
     await trip.save();
+    console.log(`✅ Trip saved with ID: ${trip._id}`);
+    console.log('Trip data:', {
+      id: trip._id,
+      transportOptionsCount: trip.transportOptions.length,
+      touristSpotsCount: trip.allTouristSpots.length,
+    });
+
+    console.log('\n🎉 === TRIP PLANNING COMPLETE ===\n');
 
     return NextResponse.json({
       success: true,
+      tripId: trip._id.toString(),
       trip: {
-        id: trip._id,
+        _id: trip._id,
         source,
         destination,
+        startDate: start,
+        endDate: end,
         duration: days,
-        transportOptions: {
-          all: transportOptions,
-          fastest,
-          cheapest,
-          recommended,
-        },
-        touristSpots,
-        itinerary,
-        costBreakdown: {
-          transport: transportCost * travelers,
-          accommodation: accommodationCost,
-          food: foodCost,
-          attractions: attractionsCost * travelers,
-          total: totalEstimatedCost,
-        },
+        travelers: travelers || 1,
+        transportOptions: trip.transportOptions,
+        allTouristSpots: trip.allTouristSpots,
+        costs: initialCosts,
       },
     });
   } catch (error: any) {
-    console.error('Trip planning error:', error);
+    console.error('\n❌ === TRIP PLANNING FAILED ===');
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+
     return NextResponse.json(
       { error: error.message || 'Failed to plan trip' },
       { status: 500 }

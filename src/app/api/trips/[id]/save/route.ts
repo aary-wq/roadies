@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
-import dbConnect from '../../../../lib/mongodb';
-import Trip from '../../../../models/Trip';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import dbConnect from '../../../../../lib/mongodb';
+import Trip from '../../../../../models/Trip';
 
-export async function GET(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -16,32 +16,29 @@ export async function GET(
 
     await dbConnect();
 
-    // AWAIT params before accessing
-    const { id } = await params;
+    const { id } = await params; // AWAIT here
     
-    console.log('Fetching trip with ID:', id);
-    console.log('User ID:', session.user.id);
+    console.log('Saving trip:', id);
 
     const trip = await Trip.findById(id);
 
-    if (!trip) {
-      console.log('Trip not found in database');
+    if (!trip || trip.userId !== session.user.id) {
       return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
     }
 
-    console.log('Trip found, userId:', trip.userId);
+    // Update status to confirmed
+    trip.status = 'confirmed';
+    await trip.save();
 
-    if (trip.userId !== session.user.id) {
-      console.log('User ID mismatch');
-      return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
-    }
+    console.log('Trip saved successfully');
 
     return NextResponse.json({
       success: true,
+      message: 'Trip saved successfully',
       trip,
     });
   } catch (error: any) {
-    console.error('Error fetching trip:', error);
+    console.error('Error saving trip:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
