@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     // Register with passport-local-mongoose
     await new Promise((resolve, reject) => {
-      User.register(newUser, password, (err: any, user: any) => {
+      (User as any).register(newUser, password, (err: any, user: any) => {
         if (err) reject(err);
         resolve(user);
       });
