@@ -12,7 +12,7 @@ interface MongooseCache {
 }
 
 declare global {
-  var mongoose: MongooseCache;
+  var mongoose: MongooseCache | undefined;
 }
 
 let cached: MongooseCache = global.mongoose || { conn: null, promise: null };
@@ -31,10 +31,15 @@ async function dbConnect(): Promise<typeof mongoose> {
       bufferCommands: false,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      console.log('✅ MongoDB Connected');
-      return mongoose;
-    });
+    cached.promise = mongoose
+.connect(MONGODB_URI, {
+    ...opts,
+    dbName: 'roadies',
+  })
+  .then((mongoose) => {
+    console.log('✅ MongoDB Connected to roadies');
+    return mongoose;
+  });
   }
 
   try {
