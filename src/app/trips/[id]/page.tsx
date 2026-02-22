@@ -421,7 +421,7 @@ export default function TripDetailsPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Existing Static Itinerary if available */}
