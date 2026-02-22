@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Calendar, Users, DollarSign, Sparkles, Loader } from 'lucide-react';
+import { MapPin, Calendar, Users, IndianRupee, Sparkles, Loader } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
@@ -121,7 +121,7 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
               {[1, 2, 3].map((s) => (
                 <div
                   key={s}
-                  className={`h-2 flex-1 mx-1 rounded-full ${
+                  className={`h-2 flex-1 mx-1 rounded-full RS{
                     s <= step ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gray-200 dark:bg-gray-700'
                   }`}
                 />
@@ -195,7 +195,7 @@ export const TripPlanningForm = ({ onClose }: TripPlanningFormProps) => {
                     placeholder="50000"
                     value={formData.budget}
                     onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
-                    icon={<DollarSign className="h-5 w-5" />}
+                    icon={<IndianRupee className="h-5 w-5" />}
                     required
                     min="1000"
                   />

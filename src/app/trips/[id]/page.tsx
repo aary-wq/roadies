@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Toaster } from 'react-hot-toast';
 import {
   ArrowLeft,
   Calendar,
@@ -32,49 +35,140 @@ export default function TripDetailsPage() {
   const [selectedSpots, setSelectedSpots] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+
+  const generateTripPDF = (trip: any, selectedSpots: any[], selectedTransport: any[]) => {
+    const doc = new jsPDF();
+    
+    // Title
+    doc.setFontSize(20);
+    doc.setTextColor(139, 69, 19); // rs-deep-brown
+    doc.text('Trip Itinerary', 105, 20, { align: 'center' });
+    
+    // Trip Details
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Destination: ${trip.destination}`, 20, 40);
+    doc.text(`Source: ${trip.source}`, 20, 48);
+    doc.text(`Dates: ${new Date(trip.startDate).toLocaleDateString()} - ${new Date(trip.endDate).toLocaleDateString()}`, 20, 56);
+    doc.text(`Travelers: ${trip.travelers}`, 20, 64);
+    doc.text(`Status: ${trip.status}`, 20, 72);
+    
+    // Selected Tourist Spots
+    doc.setFontSize(14);
+    doc.setTextColor(139, 69, 19);
+    doc.text('Selected Tourist Spots', 20, 88);
+    
+    const spotsData = selectedSpots.map((spot, i) => [
+      i + 1,
+      spot.name,
+      spot.category,
+      `${spot.estimatedTime}h`,
+      `₹${spot.entryFee}`,
+      spot.bestTimeToVisit
+    ]);
+    
+    autoTable(doc, {
+      startY: 92,
+      head: [['#', 'Spot', 'Category', 'Time', 'Fee', 'Best Time']],
+      body: spotsData,
+      theme: 'grid',
+      headStyles: { fillColor: [210, 180, 140] },
+    });
+    
+    // Selected Transport
+    const transportY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(14);
+    doc.setTextColor(139, 69, 19);
+    doc.text('Selected Transport Options', 20, transportY);
+    
+    const transportData = selectedTransport.map((t, i) => [
+      i + 1,
+      t.type,
+      t.name || 'N/A',
+      t.duration,
+      `₹${t.price}`,
+      t.comfortLevel
+    ]);
+    
+    autoTable(doc, {
+      startY: transportY + 4,
+      head: [['#', 'Type', 'Name', 'Duration', 'Price', 'Comfort']],
+      body: transportData,
+      theme: 'grid',
+      headStyles: { fillColor: [210, 180, 140] },
+    });
+    
+    // Cost Summary
+    const costY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(14);
+    doc.setTextColor(139, 69, 19);
+    doc.text('Cost Breakdown', 20, costY);
+    
+    const costs = trip.costs || {};
+    const costData = [
+      ['Transportation', `₹${costs.transportation || 0}`],
+      ['Accommodation', `₹${costs.accommodation || 0}`],
+      ['Food', `₹${costs.food || 0}`],
+      ['Activities', `₹${costs.activities || 0}`],
+      ['Total', `₹${costs.total || 0}`]
+    ];
+    
+    autoTable(doc, {
+      startY: costY + 4,
+      body: costData,
+      theme: 'plain',
+      styles: { fontSize: 11 },
+      columnStyles: {
+        0: { fontStyle: 'bold' },
+        1: { halign: 'right', fontStyle: 'bold' }
+      }
+    });
+    doc.save(`trip-${trip._id}.pdf`);
+};
+
+const fetchTripDetails = async () => {
+  try {
+    console.log('🔍 Fetching trip:', params.id);
+    
+    const response = await fetch(`/api/trips/${params.id}`);
+    const data = await response.json();
+
+    console.log('📥 Raw API Response:', data);
+    console.log('📦 Trip object keys:', Object.keys(data.trip || {}));
+    console.log('🎯 allTouristSpots exists?', 'allTouristSpots' in (data.trip || {}));
+    console.log('🎯 touristSpots exists?', 'touristSpots' in (data.trip || {}));
+    console.log('🎯 allTouristSpots value:', data.trip?.allTouristSpots);
+    console.log('🎯 touristSpots value:', data.trip?.touristSpots);
+    
+    if (!response.ok) {
+      setError(data.error || 'Failed to load trip');
+      setIsLoading(false);
+      return;
+    }
+
+    console.log('✅ Trip data counts:');
+    console.log('  - Transport options:', data.trip?.transportOptions?.length || 0);
+    console.log('  - Tourist spots (allTouristSpots):', data.trip?.allTouristSpots?.length || 0);
+    console.log('  - Tourist spots (touristSpots):', data.trip?.touristSpots?.length || 0);
+    console.log('  - Itinerary days:', data.trip?.itinerary?.length || 0);
+
+    setTripData(data.trip);
+    setFilteredTransport(data.trip.transportOptions || []);
+    setSelectedSpots(data.trip.selectedTouristSpots || []);
+  } catch (error: any) {
+    console.error('❌ Error fetching trip:', error);
+    setError('Failed to load trip details');
+  } finally {
+    setIsLoading(false);
+  }
+};
   useEffect(() => {
     if (params.id) {
       fetchTripDetails();
     }
   }, [params.id]);
 
-   const fetchTripDetails = async () => {
-    try {
-      console.log('🔍 Fetching trip:', params.id);
-      
-      const response = await fetch(`/api/trips/${params.id}`);
-      const data = await response.json();
-
-      console.log('📥 Raw API Response:', data);
-      console.log('📦 Trip object keys:', Object.keys(data.trip || {}));
-      console.log('🎯 allTouristSpots exists?', 'allTouristSpots' in (data.trip || {}));
-      console.log('🎯 touristSpots exists?', 'touristSpots' in (data.trip || {}));
-      console.log('🎯 allTouristSpots value:', data.trip?.allTouristSpots);
-      console.log('🎯 touristSpots value:', data.trip?.touristSpots);
-      
-      if (!response.ok) {
-        setError(data.error || 'Failed to load trip');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('✅ Trip data counts:');
-      console.log('  - Transport options:', data.trip?.transportOptions?.length || 0);
-      console.log('  - Tourist spots (allTouristSpots):', data.trip?.allTouristSpots?.length || 0);
-      console.log('  - Tourist spots (touristSpots):', data.trip?.touristSpots?.length || 0);
-      console.log('  - Itinerary days:', data.trip?.itinerary?.length || 0);
-
-      setTripData(data.trip);
-      setFilteredTransport(data.trip.transportOptions || []);
-      setSelectedSpots(data.trip.selectedTouristSpots || []);
-    } catch (error: any) {
-      console.error('❌ Error fetching trip:', error);
-      setError('Failed to load trip details');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  
   const handleFilterChange = (filters: any) => {
     if (!tripData || !tripData.transportOptions) return;
     
@@ -173,25 +267,30 @@ export default function TripDetailsPage() {
   const handleSaveTrip = async () => {
     try {
       setSaving(true);
-      const res = await fetch(`/api/trips/${params.id}/save`, {
+  
+      const response = await fetch(`/api/trips/${params.id}/save`, {
         method: 'POST',
       });
-
-      const data = await res.json();
-      if (data.success) {
-        alert('Trip saved successfully! ✅');
-        router.push('/dashboard');
-      } else {
-        alert('Failed to save trip: ' + (data.error || 'Unknown error'));
-      }
-    } catch (error) {
+  
+      if (!response.ok) throw new Error('Failed to save trip');
+  
+      const data = await response.json();
+  
+      generateTripPDF(
+        data.trip || tripData,
+        tripData.allTouristSpots.filter((s: any) =>
+          selectedSpots.includes(s.name)
+        ),
+        tripData.selectedTransport ? [tripData.selectedTransport] : []
+      );
+  
+      router.push('/dashboard');
+    } catch (error: any) {
       console.error('Error saving trip:', error);
-      alert('Failed to save trip');
     } finally {
       setSaving(false);
     }
   };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-950 dark:to-purple-950">
@@ -230,6 +329,7 @@ export default function TripDetailsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-purple-950 dark:to-pink-950 py-8">
+       <Toaster position="top-right" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
