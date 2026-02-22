@@ -6,7 +6,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Toaster } from 'react-hot-toast';
 import VRViewer from '../../../components/trip/VRViewer';
-import { Button } from '@/src/components/ui/Button';
+import { Button } from '../../../components/ui/Button';
 
 import {
   ArrowLeft,
@@ -337,7 +337,6 @@ const hasVRSupport = tripData && vrDestinations.includes(tripData.destination.to
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-purple-950 dark:to-pink-950 py-8">
-<<<<<<< HEAD
        <Toaster position="top-right" />
        {showVRViewer && tripData && (
   <VRViewer
@@ -345,9 +344,6 @@ const hasVRSupport = tripData && vrDestinations.includes(tripData.destination.to
     onClose={() => setShowVRViewer(false)}
   />
 )}
-=======
-      <Toaster position="top-right" />
->>>>>>> 340ff0ada084303b6c293659b933a526730c8c00
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
@@ -472,24 +468,6 @@ const hasVRSupport = tripData && vrDestinations.includes(tripData.destination.to
 
         {/* Tourist Spots Selection */}
         {tripData.allTouristSpots?.length > 0 && (
-<<<<<<< HEAD
-  <TouristSpotSelection
-    spots={tripData.allTouristSpots}
-    selectedSpots={selectedSpots}
-    onToggleSpot={handleToggleSpot}
-    maxDays={days}
-  />
-)}
-{hasVRSupport && (
-  <Button
-    onClick={() => setShowVRViewer(true)}
-    className="bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white"
-  >
-    <Eye className="mr-2 h-4 w-4" />
-    Explore with VR
-  </Button>
-)}
-=======
           <TouristSpotSelection
             spots={tripData.allTouristSpots}
             selectedSpots={selectedSpots}
@@ -497,7 +475,6 @@ const hasVRSupport = tripData && vrDestinations.includes(tripData.destination.to
             maxDays={days}
           />
         )}
->>>>>>> 340ff0ada084303b6c293659b933a526730c8c00
 
         {/* Itinerary Display */}
         {tripData.itinerary && tripData.itinerary.length > 0 && (
